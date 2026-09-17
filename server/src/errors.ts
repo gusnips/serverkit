@@ -139,8 +139,11 @@ type LiteralStatuses<S> = number extends S[keyof S]
  *   have no wait to state, so a rule would buy 78 `null`s and teach people to type one without
  *   reading — and a client cannot tell a considered `null` from a reflex one. The raiser who
  *   knows is rare, and that is exactly the shape where a capability beats an obligation.
- * - **402 — nothing to add.** 13 raises across five repos, **none** states a wait, unanimously.
- *   A 402 clears by buying; the status already says so, and the fleet has never contradicted it.
+ * - **402 — nothing to add.** Of 13 raises across five repos, **none** states a wait. That is
+ *   what was measured, and it is all that was: it says no raiser in these repos claims a 402
+ *   clears by waiting, not that none ever could. A card retry window or a transfer clearing
+ *   overnight would be a real one — and it can say so, because the wait is available at every
+ *   status. The day one turns up it is a finding rather than a contradiction.
  *
  * So the capability is on every code: a number renders `Retry-After` at any status, and an
  * explicit `null` says "durable". The residual gap it closes is narrower than "503s need
