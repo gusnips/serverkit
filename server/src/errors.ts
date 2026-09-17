@@ -127,15 +127,25 @@ type LiteralStatuses<S> = number extends S[keyof S]
  * status set INCLUDE 429. A widened `number` then requires the wait everywhere rather than
  * nowhere, which is the safe direction to fail.
  *
- * Deliberately not extended to 503, and the same counting method is what settled it: of 94
- * raises of a 502/503/504 factory across six repos, **16 state a wait and 78 do not** — the
- * inverse of the 429 ratio. Most are "the database is unreachable" or "payments are not
- * configured here", which have no wait to state, so the rule would buy 78 `null`s and teach
- * people to type one without reading. The capability is there for the raiser that does know:
- * `retryAfterSecs` is on every code, a number renders `Retry-After` at any status, and an
- * explicit `null` says "durable" — which is the answer to a client that cannot otherwise tell
- * a 503 meaning "not configured on this deployment" from one meaning "did not answer just now".
- * Available, not compulsory.
+ * Deliberately not extended, and the same counting method is what settled each one. Three
+ * statuses, one method, three different answers — which is the strongest thing that can be said
+ * for the method:
+ *
+ * - **429 — obligation.** 34 of 40 raises already state a wait, so the required argument mostly
+ *   records a decision somebody had already made, and each of the six exceptions is
+ *   interesting.
+ * - **503 — capability, not obligation.** Only 16 of 94 raises of a 502/503/504 factory state
+ *   one. Most are "the database is unreachable" or "payments are not configured here", which
+ *   have no wait to state, so a rule would buy 78 `null`s and teach people to type one without
+ *   reading — and a client cannot tell a considered `null` from a reflex one. The raiser who
+ *   knows is rare, and that is exactly the shape where a capability beats an obligation.
+ * - **402 — nothing to add.** 13 raises across five repos, **none** states a wait, unanimously.
+ *   A 402 clears by buying; the status already says so, and the fleet has never contradicted it.
+ *
+ * So the capability is on every code: a number renders `Retry-After` at any status, and an
+ * explicit `null` says "durable". The residual gap it closes is narrower than "503s need
+ * waits" — it is ONE code raised in two senses, durable and transient, indistinguishable in the
+ * envelope. The raiser that answers closes it for its own code, and nobody else is nagged.
  *
  * `null` is the other half, and the six are what proved it necessary. Two of them cannot state
  * a wait truthfully: a concurrency slot frees when somebody else's job finishes, and a cap on
