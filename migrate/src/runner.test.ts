@@ -354,13 +354,17 @@ describe("the lock", () => {
       "1_a.sql": "CREATE TABLE public.once (x int);",
       "2_b.sql": "SELECT 1;",
     });
-    const waiting = migrate(dir, { lockWaitSeconds: 10 });
+    const log = captureLog();
+    const waiting = runMigrations({
+      dir,
+      databaseUrl: db.url,
+      confirm: null,
+      log,
+      lockWaitSeconds: 10,
+    });
     // Only once the second run is really waiting on the lock, or it would plan after the first.
     for (let tries = 0; tries < 200; tries++) {
-      const { rowCount } = await holder.client.query(
-        "SELECT 1 FROM pg_locks WHERE locktype = 'advisory' AND NOT granted",
-      );
-      if (rowCount) break;
+      if (log.text().includes("Another run holds the migration lock")) break;
       await new Promise((resolve) => setTimeout(resolve, 25));
     }
     // Play the first run: it applies 1_a, then ends its session.
@@ -372,10 +376,47 @@ describe("the lock", () => {
     const run = await waiting;
     expect(run.exitCode).toBe(0);
     expect(run.applied).toEqual(["2_b.sql"]);
-    expect(run.log.text()).toContain("Another run holds the migration lock");
-    expect(run.log.text()).toContain(
-      "1 file(s) were applied by another run while this one waited.",
+    expect(log.text()).toContain("Another run holds the migration lock");
+    expect(log.text()).toContain("1 file(s) were applied by another run while this one waited.");
+  });
+
+  it("waits without holding a snapshot, so a CONCURRENTLY build it waits behind finishes valid", async () => {
+    // A run blocked inside `pg_advisory_lock` holds a snapshot for as long as it waits. CREATE INDEX
+    // CONCURRENTLY in the session holding the lock waits for every older snapshot to end, and that
+    // one is waiting for the lock: Postgres reports a deadlock after deadlock_timeout (1s) and one
+    // side dies, often the build, which leaves an INVALID index behind.
+    const dir = await folder({
+      "1_a.sql": "CREATE TABLE public.big AS SELECT g AS x FROM generate_series(1, 10000) g;",
+      "2_b.sql":
+        "-- migrate: no-transaction\nSELECT pg_sleep(2);\nCREATE INDEX CONCURRENTLY big_x_idx ON public.big (x);",
+    });
+    const firstLog = captureLog();
+    const first = runMigrations({ dir, databaseUrl: db.url, confirm: null, log: firstLog });
+    // Start the second run once the first holds the lock and is inside 2_b's sleep.
+    for (let tries = 0; tries < 400; tries++) {
+      if (firstLog.text().includes("Applying 2_b.sql")) break;
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    }
+    const secondLog = captureLog();
+    const second = await runMigrations({
+      dir,
+      databaseUrl: db.url,
+      confirm: null,
+      log: secondLog,
+      lockWaitSeconds: 30,
+    });
+    const firstResult = await first;
+
+    expect(firstLog.text()).not.toContain("Failed");
+    expect(firstResult.exitCode).toBe(0);
+    expect(secondLog.text()).not.toContain("Fatal");
+    expect(second.exitCode).toBe(0);
+    expect(secondLog.text()).toContain("Another run holds the migration lock");
+    expect(second.applied).toEqual([]);
+    const index = await db.query<{ valid: boolean }>(
+      "SELECT indisvalid AS valid FROM pg_index WHERE indexrelid = 'public.big_x_idx'::regclass",
     );
+    expect(index).toEqual([{ valid: true }]);
   });
 
   it("uses the key it is given", async () => {

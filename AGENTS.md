@@ -85,11 +85,17 @@ When one fails, a lesson is being unlearned.
    blocks while stdin stays open, which is what `ssh host 'migrate --manual'` gives it.
 2. **The lock comes before any DDL, and the wait for it is bounded.** Six runners created the
    tracking table before locking, and two runners creating it at once on an empty database can fail
-   on the catalog's unique index. The wait is `lock_timeout` on `pg_advisory_lock` (measured: it
-   applies), 120 seconds by default, and the message names the session that holds it. The key is
-   one default, `727001001`, in every repo; most old runners used another key or none, so during the
-   one deploy that swaps a repo's runner an old run and a new run may not exclude each other, and
-   that repo's deploy concurrency group is what covers it.
+   on the catalog's unique index. The wait is 120 seconds by default, and the message names the
+   session that holds it. **The wait polls `pg_try_advisory_lock` once a second; it never blocks in
+   `pg_advisory_lock`.** A session blocked in that call holds a snapshot for the whole wait. When the
+   run holding the lock is building an index CONCURRENTLY in a no-transaction file, the build waits
+   for every older snapshot to end, the waiter's included, and the waiter waits for the lock.
+   Postgres reports `deadlock detected` after `deadlock_timeout` (1s), long before any
+   `lock_timeout`, and kills one side; when that is the build, the index stays INVALID. Reproduced
+   in two donor runners, with and without `lock_timeout`, and in this package's test before the fix.
+   The key is one default, `727001001`, in every repo; most old runners used another key or none, so
+   during the one deploy that swaps a repo's runner an old run and a new run may not exclude each
+   other, and that repo's deploy concurrency group is what covers it.
 3. **`RESET ALL` before every file.** A `pg_dump` baseline runs
    `set_config('search_path', '', false)`, which lasts for the session, so in three donors every file
    after the baseline failed at its first unqualified name, on any replay from empty. The same dump
@@ -167,6 +173,14 @@ When one fails, a lesson is being unlearned.
 connect without a certificate check, and every other host connects without TLS. Whether Supabase
 cloud certificates verify with Node's default CA store has not been measured. Until it is,
 `sslmode=verify-full` in the URL is how an adopter asks for a check.
+
+### A driver fact
+
+`pg` cannot connect to a bracketed IPv6 URL: `postgresql://…@[::1]:5432/app` fails with `ENOTFOUND`,
+because the brackets reach the DNS lookup, while `host: "::1"` connects. Measured with pg 8.23 under
+both Bun 1.3.8 and Node 22. It is the driver's, not the runner's, and `describeTarget` stripping the
+brackets is still right for the guard. Someone on IPv6 loopback writes `localhost` or passes the
+host outside the URL.
 
 ## What the build measured
 

@@ -15,6 +15,9 @@ import { LOG_PREFIX, manualPendingLine, statusPendingLine, STATUS_UP_TO_DATE } f
 import { pgSsl } from "./ssl.ts";
 import { confirmationReason, describeTarget } from "./target.ts";
 
+/** How often a run waiting for the lock tries it again. */
+const LOCK_POLL_MS = 1000;
+
 /** The advisory lock key a run takes unless told otherwise. Locks are per database. */
 export const DEFAULT_LOCK_KEY = 727_001_001;
 
@@ -387,36 +390,41 @@ async function tableExists(client: Client, table: string): Promise<boolean> {
 /**
  * Take the session advisory lock before any DDL, and wait for it only so long.
  *
- * Session-scoped, so it goes away when the connection closes, crash included. The wait is bounded
- * with `lock_timeout`, which applies to advisory locks (measured), and the message names the
+ * Session-scoped, so it goes away when the connection closes, crash included. The message names the
  * session holding it, so a stuck deploy says what it is stuck behind.
+ *
+ * The wait is `pg_try_advisory_lock` once a second, never a blocking `pg_advisory_lock`. A session
+ * blocked inside that call holds a snapshot for the whole wait. When the run holding the lock is in
+ * a no-transaction file building an index CONCURRENTLY, the build waits for every older snapshot to
+ * end, the waiter's included, while the waiter waits for the lock: Postgres calls it a deadlock
+ * after `deadlock_timeout` (1s by default), long before any `lock_timeout`, and kills one side. When
+ * it kills the build, the index stays behind INVALID. Between tries the waiter holds no snapshot.
  */
 async function acquireLock(
   client: Client,
   { key, waitSeconds, say }: { key: number; waitSeconds: number; say: (line: string) => void },
 ): Promise<void> {
-  const { rows } = await client.query<{ locked: boolean }>(
-    "SELECT pg_try_advisory_lock($1::bigint) AS locked",
-    [key],
-  );
-  if (rows[0]?.locked) return;
+  const tryLock = async () =>
+    (
+      await client.query<{ locked: boolean }>("SELECT pg_try_advisory_lock($1::bigint) AS locked", [
+        key,
+      ])
+    ).rows[0]?.locked === true;
+  if (await tryLock()) return;
 
-  const holder = await lockHolder(client, key);
-  say(`Another run holds the migration lock (${holder}). Waiting up to ${String(waitSeconds)}s.`);
-  await client.query(`SET lock_timeout = '${String(Math.max(1, Math.round(waitSeconds)))}s'`);
-  try {
-    await client.query("SELECT pg_advisory_lock($1::bigint)", [key]);
-  } catch (err) {
-    if (err instanceof Error && Reflect.get(err, "code") === "55P03")
-      throw new Error(
-        `Waited ${String(waitSeconds)}s for the migration lock, and ${holder} still holds it. ` +
-          "If that run is stuck, end it, then run this again.",
-        { cause: err },
-      );
-    throw err;
-  } finally {
-    await client.query("RESET lock_timeout");
+  say(
+    `Another run holds the migration lock (${await lockHolder(client, key)}). ` +
+      `Waiting up to ${String(waitSeconds)}s.`,
+  );
+  const deadline = Date.now() + waitSeconds * 1000;
+  for (let left = deadline - Date.now(); left > 0; left = deadline - Date.now()) {
+    await new Promise((resolve) => setTimeout(resolve, Math.min(LOCK_POLL_MS, left)));
+    if (await tryLock()) return;
   }
+  throw new Error(
+    `Waited ${String(waitSeconds)}s for the migration lock, and ${await lockHolder(client, key)} ` +
+      "still holds it. If that run is stuck, end it, then run this again.",
+  );
 }
 
 async function lockHolder(client: Client, key: number): Promise<string> {
