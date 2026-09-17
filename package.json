@@ -9,7 +9,7 @@
   "scripts": {
     "build": "bun run --filter '*' build",
     "test": "bun run --filter '*' test",
-    "typecheck": "bun run --filter '*' typecheck",
+    "typecheck": "bun run --filter '*' typecheck && tsc -p tsconfig.scripts.json",
     "lint": "eslint migrate scripts",
     "release:check": "bun run scripts/check-release.ts",
     "format": "prettier --write .",
