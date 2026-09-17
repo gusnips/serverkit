@@ -1,0 +1,15 @@
+{
+  "extends": "../tsconfig.base.json",
+  "compilerOptions": {
+    // Web-standard only. `.` and `/hono` have to import cleanly inside a Cloudflare Worker, which
+    // has no `process`, no `node:*` and no sync Web Crypto — so the Node types are deliberately
+    // absent here and `bun run purity` is what stops a `node:` import from sneaking back in.
+    // The one directory that may reach for Node is `src/node/`, typechecked by tsconfig.node.json.
+    "lib": ["ES2022", "DOM"],
+    "types": [],
+    "rootDir": "./src",
+    "noEmit": true
+  },
+  "include": ["src/**/*"],
+  "exclude": ["src/node/**/*", "src/**/__tests__/**/*"]
+}

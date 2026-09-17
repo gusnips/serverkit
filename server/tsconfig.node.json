@@ -1,0 +1,13 @@
+{
+  "extends": "../tsconfig.base.json",
+  "compilerOptions": {
+    // `src/node/` and the tests. This is the only place a `node:` import typechecks, which is why
+    // the two configs exist: a root-level @types/node is visible to every workspace, so without
+    // the split a stray `node:crypto` in `src/` would typecheck fine and break a Worker.
+    "lib": ["ES2022", "DOM"],
+    "types": ["node"],
+    "rootDir": "./src",
+    "noEmit": true
+  },
+  "include": ["src/**/*"]
+}
