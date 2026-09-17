@@ -4,7 +4,7 @@
   "description": "The layer under a TypeScript backend: one error shape, one response envelope, one retry rule, one logger.",
   "type": "module",
   "license": "MIT",
-  "author": "Gustavo Salomé",
+  "author": "Gustavo Salom\u00e9",
   "homepage": "https://github.com/gusnips/serverkit/tree/main/server#readme",
   "bugs": {
     "url": "https://github.com/gusnips/serverkit/issues"
@@ -13,14 +13,6 @@
     ".": {
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
-    },
-    "./hono": {
-      "types": "./dist/hono/index.d.ts",
-      "default": "./dist/hono/index.js"
-    },
-    "./node": {
-      "types": "./dist/node/index.d.ts",
-      "default": "./dist/node/index.js"
     }
   },
   "types": "./dist/index.d.ts",
