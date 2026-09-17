@@ -1,0 +1,17 @@
+name: Probe Deploy
+
+# The listener under test: this is the shape every deploy in that fleet uses.
+on:
+    workflow_run:
+        workflows: ["Probe CI"]
+        types: [completed]
+
+jobs:
+    probe:
+        runs-on: ubuntu-latest
+        steps:
+            - run: |
+                  echo "Probe Deploy woke."
+                  echo "triggering run id: ${{ github.event.workflow_run.id }}"
+                  echo "triggering event:  ${{ github.event.workflow_run.event }}"
+                  echo "triggering actor:  ${{ github.event.workflow_run.actor.login }}"
