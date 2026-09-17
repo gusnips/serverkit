@@ -36,10 +36,8 @@
     "server": {
       "name": "@gusnips/server",
       "version": "0.0.0",
-      "dependencies": {
-        "@gusnips/http": "^0.1.0",
-      },
       "devDependencies": {
+        "@gusnips/http": ">=0.1 <1",
         "@types/node": "^24.12.0",
         "hono": "^4.10.6",
         "typescript": "^5.9.3",
@@ -47,6 +45,7 @@
         "zod": "^4.3.6",
       },
       "peerDependencies": {
+        "@gusnips/http": ">=0.1 <1",
         "hono": ">=4 <5",
       },
       "optionalPeers": [

@@ -5,8 +5,11 @@ answer. No framework at the root: it runs in a Cloudflare Worker, in a Bun or No
 queue consumer, and in an MCP tool handler.
 
 ```bash
-bun add @gusnips/server
+bun add @gusnips/server @gusnips/http
 ```
+
+`@gusnips/http` is a required peer: it declares the envelope, and your API and your browser
+client both import it, so there is one declaration of the wire contract and not two.
 
 ```ts
 import { ok } from "@gusnips/server";
@@ -18,6 +21,11 @@ ok({ id: 1 });
 Every 2xx body is `{ data }`. Every refusal is `{ error: { code, message, messageKey?, params?,
 details? } }`. That is the envelope `@gusnips/http` declares and a browser client parses, so the
 two ends of one request never disagree about the shape.
+
+**Import `ApiError`, `ApiSuccess` and `PaginationMeta` from `@gusnips/http`, not from here.**
+This package does not re-export them, on purpose: two names for one type is how a version skew
+becomes invisible. You already have the import — the contract is the package your client reads
+it from too.
 
 ## Answering a request
 
@@ -65,6 +73,13 @@ Then throw one, anywhere:
 ```ts
 throw errors.notFound("Workspace");
 ```
+
+`AppError` has no `toJSON()`, and that is load-bearing rather than an omission. `JSON.stringify`
+calls a value's own `toJSON()` **before** it calls the replacer, so a class that defines one
+never reaches a logger's `Error` branch: `logger.error("failed", { error: err })` writes
+`{"error":{"error":{code,message}}}` with no stack and no cause. Seven backends define one and
+all seven log exactly that. The wire body comes from `errorResponse`, where the mask lives
+anyway, and the error stays an error.
 
 The map has to be `as const`, or every value reads as `number` and the rule below cannot see a 429. A map without it is refused, with the instruction in the compiler's message.
 
