@@ -535,6 +535,21 @@ describe("after a run", () => {
     expect(await readFile(marks, "utf8")).toBe("ran\n");
   });
 
+  it("never runs the types command under --status, even with --types", async () => {
+    // --status stays read-only whatever else is on the line: one wrapper regenerated types after
+    // every status check.
+    const dir = await folder({ "1_a.sql": "SELECT 1;" });
+    const marks = join(dir, "types-ran.txt");
+    const run = await migrate(dir, {
+      status: true,
+      types: true,
+      typesCommand: `echo ran >> "${marks}"`,
+    });
+    expect(run.exitCode).toBe(0);
+    await expect(readFile(marks, "utf8")).rejects.toThrow();
+    expect(await schemaExists("app")).toBe(false);
+  });
+
   it("does not run the types command unless asked", async () => {
     const dir = await folder({ "1_a.sql": "SELECT 1;" });
     const marks = join(dir, "types-ran.txt");

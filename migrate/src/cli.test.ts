@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { promisify } from "node:util";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { migrateCli } from "./cli.ts";
@@ -71,6 +71,21 @@ describe("migrateCli", () => {
       expect(run.code, `${argv.join(" ")} ${JSON.stringify(env)}`).toBe(0);
       await db.query("DROP SCHEMA IF EXISTS app CASCADE; DROP TABLE IF EXISTS public.one;");
     }
+  });
+
+  it("reads MIGRATE_CONFIRM as a yes only when it is 1", async () => {
+    // A `MIGRATE_CONFIRM=0` left in a shell is somebody saying no, not a truthy string.
+    const port = new URL(db.url).port;
+    for (const value of ["0", "", "true"])
+      expect((await cli(["--tunnel-port", port], { MIGRATE_CONFIRM: value })).code, value).toBe(1);
+    expect(await applied()).toBe(false);
+  });
+
+  it("takes the folder as a file URL, the way an adopter's script passes it", async () => {
+    const log = captureLog();
+    const code = await migrateCli({ dir: pathToFileURL(dir) }, [], { DATABASE_URL: db.url }, log);
+    expect(code).toBe(0);
+    expect(await applied()).toBe(true);
   });
 
   it("forwards --manual, --types and --types-command", async () => {
