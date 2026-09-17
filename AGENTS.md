@@ -86,7 +86,10 @@ When one fails, a lesson is being unlearned.
 2. **The lock comes before any DDL, and the wait for it is bounded.** Six runners created the
    tracking table before locking, and two runners creating it at once on an empty database can fail
    on the catalog's unique index. The wait is `lock_timeout` on `pg_advisory_lock` (measured: it
-   applies), 120 seconds by default, and the message names the session that holds it.
+   applies), 120 seconds by default, and the message names the session that holds it. The key is
+   one default, `727001001`, in every repo; most old runners used another key or none, so during the
+   one deploy that swaps a repo's runner an old run and a new run may not exclude each other, and
+   that repo's deploy concurrency group is what covers it.
 3. **`RESET ALL` before every file.** A `pg_dump` baseline runs
    `set_config('search_path', '', false)`, which lasts for the session, so in three donors every file
    after the baseline failed at its first unqualified name, on any replay from empty. The same dump
@@ -98,8 +101,10 @@ When one fails, a lesson is being unlearned.
    `CONCURRENTLY`. The splitter refuses `BEGIN ATOMIC` rather than cut a function body in half.
 5. **Directives come from the leading comment block only, and an unknown one is an error.** The old
    marker `-- @manual` meant "gated, in a transaction" in four runners and "no transaction" in six,
-   so reading it either way changes one family's files without a word. It is an error now, and so is
-   a directive after the first statement, because that is a directive somebody thinks is working.
+   so reading it either way changes one family's files without a word. It is an error now on any
+   line of the file, not only at the top: six runners matched it anywhere, so a file marked below its
+   first statement was held, and it must not start applying without a word. A `-- migrate:`
+   directive after the first statement is an error too, because somebody thinks it is working.
 6. **A held file is held, not a halt.** Later files still apply. A halt would turn every gated
    contract migration, which can wait weeks for a person, into a schema freeze. A later file that
    needs a held one fails loudly, in its own transaction. CI replays pass `--manual --yes`, because a

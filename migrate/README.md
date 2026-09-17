@@ -59,7 +59,8 @@ CREATE INDEX CONCURRENTLY orders_created_idx ON app.orders (created_at);
 needs this for `CREATE INDEX CONCURRENTLY`, `VACUUM` and a few others. If one statement fails, the
 ones before it stay applied.
 
-The old `-- @manual` marker is an error. Write one or both directives instead.
+The old `-- @manual` marker is an error on any line of a file. Write one or both directives, at the
+top, instead.
 
 ## Flags
 
