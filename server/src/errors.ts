@@ -2,10 +2,13 @@
  * The one error a route throws, and the one function that turns any thrown value into words.
  *
  * Extracted from six backends whose copies of this file are byte-identical in the parts that
- * matter: `toJSON()` in four of them, `toMessage()` in six. Where they differ, the version
- * carrying the production reason won — every comment below names a failure somebody shipped.
+ * matter: the envelope builder in four of them, `toMessage()` in six. Where they differ, the
+ * version carrying the production reason won — every comment below names a failure somebody
+ * shipped.
+ *
+ * Nothing here knows about the wire. That is deliberate and it is the fix to a live bug; see
+ * the note on {@link AppError}.
  */
-import type { ApiError } from "@gusnips/http";
 
 export interface AppErrorOptions<Key extends string = string> {
   /** What makes the refusal ACTIONABLE: the plan that lifts a 402, the scope of a quota. */
@@ -51,6 +54,14 @@ export interface AppErrorOptions<Key extends string = string> {
  * Prefer {@link createAppError} over `new AppError(…)`: it reads the status off your own
  * code→status map, so no call site names a status and a code added without one is a build
  * error.
+ *
+ * **There is no `toJSON()`, on purpose.** `JSON.stringify` calls a value's own `toJSON()`
+ * BEFORE it calls the replacer, so a class that defines one never reaches a logger's `Error`
+ * branch at all. Seven backends define one here, and every one of them logs
+ * `{"error":{"error":{code,message}}}` — doubly nested, with no `stack` and no `cause` — from a
+ * line that still looks like a log line. A logger cannot fix that from its side, because its
+ * replacer never runs. So the wire body is built by `errorResponse`, where the mask lives
+ * anyway, and this stays an ordinary Error to anything that serializes it.
  */
 export class AppError<Code extends string = string, Key extends string = string> extends Error {
   public readonly statusCode: number;
@@ -71,38 +82,6 @@ export class AppError<Code extends string = string, Key extends string = string>
     this.params = opts.params;
     this.retryAfterSecs = opts.retryAfterSecs;
     this.expose = opts.expose ?? false;
-  }
-
-  toJSON(): ApiError<Code> {
-    const details = this.detailsWithRetry();
-    return {
-      error: {
-        code: this.code,
-        message: this.message,
-        ...(this.messageKey !== undefined && { messageKey: this.messageKey }),
-        ...(this.params !== undefined && { params: this.params }),
-        ...(details !== undefined && { details }),
-      },
-    };
-  }
-
-  /**
-   * `retryAfterSecs` also rides inside `details`, because that is where clients already look —
-   * an explicit `null` included, since "waiting cannot fix this" is an answer a client needs
-   * and the only alternative is the hand-written code list this replaces.
-   *
-   * Only an object `details` can carry it. Spreading an ARRAY — a list of validation issues —
-   * turns it into `{"0": …}` and breaks every client that parses it; spreading a STRING turns
-   * it into one key per character. Anything that is not a plain object is handed back
-   * untouched, and the header still tells that caller when to come back.
-   */
-  private detailsWithRetry(): unknown {
-    if (this.retryAfterSecs === undefined) return this.details;
-    const carries =
-      this.details === undefined ||
-      (typeof this.details === "object" && this.details !== null && !Array.isArray(this.details));
-    if (!carries) return this.details;
-    return { ...this.details, retryAfterSecs: this.retryAfterSecs };
   }
 }
 

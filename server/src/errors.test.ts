@@ -1,59 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { AppError, toMessage } from "./errors.ts";
 
-describe("AppError.toJSON", () => {
-  it("omits every optional field that was not set", () => {
-    const body = new AppError(404, "NOT_FOUND", "Workspace not found").toJSON();
-    expect(body).toEqual({ error: { code: "NOT_FOUND", message: "Workspace not found" } });
-  });
-
-  it("carries messageKey, params and details when they are set", () => {
-    const body = new AppError(402, "PLAN_GATE", "Webhooks are not in your plan", {
-      messageKey: "serverErrors.planGate",
-      params: { gate: "webhooks" },
-      details: { gate: "webhooks", upgradeTo: "starter" },
-    }).toJSON();
-    expect(body.error.messageKey).toBe("serverErrors.planGate");
-    expect(body.error.params).toEqual({ gate: "webhooks" });
-    expect(body.error.details).toEqual({ gate: "webhooks", upgradeTo: "starter" });
-  });
-});
-
-describe("a stated wait rides in details as well as the header", () => {
-  it("folds retryAfterSecs into an object details", () => {
-    const body = new AppError(429, "RATE_LIMIT_EXCEEDED", "Too many requests", {
-      details: { limit: 60 },
-      retryAfterSecs: 30,
-    }).toJSON();
-    expect(body.error.details).toEqual({ limit: 60, retryAfterSecs: 30 });
-  });
-
-  it("folds it into an absent details", () => {
-    const body = new AppError(429, "RATE_LIMIT_EXCEEDED", "Too many requests", {
-      retryAfterSecs: 30,
-    }).toJSON();
-    expect(body.error.details).toEqual({ retryAfterSecs: 30 });
-  });
-
-  it("hands an ARRAY details back untouched", () => {
-    const issues = [{ path: ["url"], code: "invalid_string" }];
-    const body = new AppError(400, "VALIDATION_ERROR", "Invalid request", {
-      details: issues,
-      retryAfterSecs: 5,
-    }).toJSON();
-    expect(body.error.details).toEqual(issues);
-    expect(Array.isArray(body.error.details)).toBe(true);
-  });
-
-  it("hands a STRING details back untouched", () => {
-    const body = new AppError(429, "QUOTA_EXCEEDED", "Spent", {
-      details: "month",
-      retryAfterSecs: 5,
-    }).toJSON();
-    expect(body.error.details).toBe("month");
-  });
-});
-
 describe("toMessage", () => {
   it("reads an Error's message", () => {
     expect(toMessage(new Error("boom"))).toBe("boom");
@@ -86,5 +33,42 @@ describe("toMessage", () => {
   it("falls back to String() for a primitive", () => {
     expect(toMessage(null)).toBe("null");
     expect(toMessage(42)).toBe("42");
+  });
+});
+
+describe("an AppError is an ordinary Error to anything that serializes it", () => {
+  /**
+   * `JSON.stringify` calls a value's own `toJSON()` BEFORE it calls the replacer, so a class
+   * that defines one never reaches a logger's Error branch at all. Seven backends define
+   * `toJSON()` on this class, so `logger.error("x", { error: appErr })` writes a doubly-nested
+   * envelope with no `stack` and no `cause` — live in all seven, and invisible because the line
+   * still looks like a log line. The wire body is built by `errorResponse`; the error stays an
+   * error.
+   */
+  function serializeLikeALogger(value: unknown): { json: string; sawError: boolean } {
+    let sawError = false;
+    const json = JSON.stringify(value, (_key, val: unknown) => {
+      if (val instanceof Error) {
+        sawError = true;
+        return { name: val.name, message: val.message, stack: val.stack, cause: val.cause };
+      }
+      return val;
+    });
+    return { json, sawError };
+  }
+
+  it("reaches the replacer's Error branch, with its stack and its cause", () => {
+    const cause = new Error("connection refused");
+    const err = new AppError(500, "INTERNAL_ERROR", "the write failed", { cause });
+    const { json, sawError } = serializeLikeALogger({ error: err });
+    expect(sawError).toBe(true);
+    expect(json).toContain("the write failed");
+    expect(json).toContain("connection refused");
+    expect(json).toContain('"stack"');
+  });
+
+  it("defines no toJSON, so nothing can shadow that branch", () => {
+    const err = new AppError(500, "INTERNAL_ERROR", "boom");
+    expect("toJSON" in err).toBe(false);
   });
 });

@@ -93,6 +93,45 @@ export interface ErrorResponseOptions<Code extends string, Key extends string> {
   maskDetails?: boolean;
 }
 
+/**
+ * `retryAfterSecs` also rides inside `details`, because that is where clients already look —
+ * an explicit `null` included, since "waiting cannot fix this" is an answer a client needs and
+ * the only alternative is the hand-written code list this replaces.
+ *
+ * Only an object `details` can carry it. Spreading an ARRAY — a list of validation issues —
+ * turns it into `{"0": …}` and breaks every client that parses it; spreading a STRING turns it
+ * into one key per character. Anything that is not a plain object is handed back untouched, and
+ * the header still tells that caller when to come back.
+ */
+function detailsWithRetry(err: AppError): unknown {
+  if (err.retryAfterSecs === undefined) return err.details;
+  const carries =
+    err.details === undefined ||
+    (typeof err.details === "object" && err.details !== null && !Array.isArray(err.details));
+  if (!carries) return err.details;
+  return { ...err.details, retryAfterSecs: err.retryAfterSecs };
+}
+
+/**
+ * The wire body for an error somebody raised on purpose.
+ *
+ * It is a function rather than a method on `AppError`, and that is a fix rather than a style
+ * choice — see the note on the class. It also keeps the envelope in one file with the mask,
+ * instead of in two.
+ */
+function appErrorBody<Code extends string>(err: AppError<Code>): ApiError<Code> {
+  const details = detailsWithRetry(err);
+  return {
+    error: {
+      code: err.code,
+      message: err.message,
+      ...(err.messageKey !== undefined && { messageKey: err.messageKey }),
+      ...(err.params !== undefined && { params: err.params }),
+      ...(details !== undefined && { details }),
+    },
+  };
+}
+
 function envelope<Code extends string, Key extends string>(
   canned: CannedError<Code, Key>,
   details?: unknown,
@@ -208,7 +247,7 @@ export function createErrorResponse<Code extends string = string, Key extends st
       if (err.statusCode === 401) headers["WWW-Authenticate"] = "Bearer";
 
       if (err.statusCode < 500)
-        return { status: err.statusCode, body: err.toJSON(), headers, kind: "client" };
+        return { status: err.statusCode, body: appErrorBody(err), headers, kind: "client" };
 
       const hide = !err.expose && (opts.maskAll === true || maskedCodes.includes(err.code));
       if (hide) {
@@ -219,7 +258,7 @@ export function createErrorResponse<Code extends string = string, Key extends st
         // already a 500.
         return { status: err.statusCode, body: envelope(opts.internal), headers, kind: "server" };
       }
-      const body = err.toJSON();
+      const body = appErrorBody(err);
       if (opts.maskDetails === true) delete body.error.details;
       return { status: err.statusCode, body, headers, kind: "server" };
     }

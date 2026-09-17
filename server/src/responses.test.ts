@@ -52,6 +52,59 @@ describe("success helpers", () => {
   });
 });
 
+describe("the error envelope", () => {
+  it("omits every optional field that was not set", () => {
+    expect(errorResponse(appError("NOT_FOUND", "Workspace not found")).body).toEqual({
+      error: { code: "NOT_FOUND", message: "Workspace not found" },
+    });
+  });
+
+  it("carries messageKey, params and details when they are set", () => {
+    const body = errorResponse(
+      appError("NOT_FOUND", "No such plan", {
+        messageKey: "serverErrors.notFound",
+        params: { id: "pro" },
+        details: { id: "pro", upgradeTo: "starter" },
+      }),
+    ).body;
+    expect(body.error.messageKey).toBe("serverErrors.notFound");
+    expect(body.error.params).toEqual({ id: "pro" });
+    expect(body.error.details).toEqual({ id: "pro", upgradeTo: "starter" });
+  });
+
+  it("folds a stated wait into an object details", () => {
+    const err = appError("RATE_LIMIT_EXCEEDED", "Too many requests", {
+      details: { limit: 60 },
+      retryAfterSecs: 30,
+    });
+    expect(errorResponse(err).body.error.details).toEqual({ limit: 60, retryAfterSecs: 30 });
+  });
+
+  it("folds it into an absent details", () => {
+    const err = appError("RATE_LIMIT_EXCEEDED", "Too many requests", { retryAfterSecs: 30 });
+    expect(errorResponse(err).body.error.details).toEqual({ retryAfterSecs: 30 });
+  });
+
+  it("hands an ARRAY details back untouched", () => {
+    const issues = [{ path: ["url"], code: "invalid_string" }];
+    const err = appError("RATE_LIMIT_EXCEEDED", "Too many requests", {
+      details: issues,
+      retryAfterSecs: 5,
+    });
+    const details = errorResponse(err).body.error.details;
+    expect(details).toEqual(issues);
+    expect(Array.isArray(details)).toBe(true);
+  });
+
+  it("hands a STRING details back untouched", () => {
+    const err = appError("RATE_LIMIT_EXCEEDED", "Spent", {
+      details: "month",
+      retryAfterSecs: 5,
+    });
+    expect(errorResponse(err).body.error.details).toBe("month");
+  });
+});
+
 describe("a validation failure is a 400 that reflects nothing back", () => {
   const schema = z
     .object({ days: z.enum(["7", "30"]), timeoutMs: z.number().max(30_000) })
