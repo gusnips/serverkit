@@ -34,3 +34,15 @@ export {
   SUPABASE_STAND_IN_PATH,
   STAND_IN_USAGE,
 } from "./stand-in.ts";
+export {
+  generateTypes,
+  readCatalog,
+  renderTypes,
+  type Catalog,
+  type ColumnRow,
+  type GeneratedTypes,
+  type Relationship,
+  type TypesOptions,
+  type TypesShape,
+} from "./db-types.ts";
+export { dbTypesCli, DB_TYPES_USAGE } from "./db-types-cli.ts";
