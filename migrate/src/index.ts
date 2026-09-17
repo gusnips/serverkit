@@ -28,3 +28,9 @@ export {
 } from "./target.ts";
 export { pgSsl } from "./ssl.ts";
 export { unreadableTablesCheck } from "./checks.ts";
+export {
+  applySupabaseStandIn,
+  standInCli,
+  SUPABASE_STAND_IN_PATH,
+  STAND_IN_USAGE,
+} from "./stand-in.ts";

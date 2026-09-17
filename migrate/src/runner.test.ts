@@ -532,11 +532,7 @@ describe("after a run", () => {
 
 describe("unreadableTablesCheck", () => {
   it("warns about tables service_role cannot read, and passes the ones it can", async () => {
-    await db.query(`DO $$ BEGIN
-        IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'service_role') THEN
-          CREATE ROLE service_role NOLOGIN;
-        END IF;
-      END $$;`);
+    // service_role exists already: the global setup creates the Supabase roles once.
     const dir = await folder({
       "1_a.sql":
         "CREATE TABLE public.forgotten (x int);\nCREATE TABLE public.granted (x int);\nGRANT SELECT ON public.granted TO service_role;",
