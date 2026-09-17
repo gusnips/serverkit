@@ -84,11 +84,17 @@ export interface ErrorResponseOptions<Code extends string, Key extends string> {
   /** Replace every 5xx message, and let `expose` be what opts an authored sentence back in. */
   maskAll?: boolean;
   /**
-   * Drop `details` from every 5xx, masked or not — a separate knob because it is a separate
-   * decision. The newest donors put a readiness report in a 503's details, naming which
-   * dependency is down so a deploy gate and a human at 3am can both read it; another donor's
-   * details are where caught error text is recorded, and must never go out. Both are right
-   * about their own repo, which is why this is not folded into the mask above.
+   * Drop `details` from a 5xx whose message you did NOT mask — a separate knob because it is a
+   * separate decision. The newest donors put a readiness report in a 503's details, naming
+   * which dependency is down so a deploy gate and a human at 3am can both read it; another
+   * donor's details are where caught error text is recorded, and must never go out. Both are
+   * right about their own repo, which is why this is not folded into the mask above. (A masked
+   * 5xx drops its details on its own: the body is built fresh from `internal`.)
+   *
+   * The sharpest reason to turn it on is a caught driver error handed straight to `details`.
+   * On a CHECK or NOT NULL violation Postgres writes the ENTIRE failing row into its `detail`
+   * field — `Failing row contains (someone@example.com, 4242…)`, every column, values
+   * included. Measured against a real server, not assumed.
    */
   maskDetails?: boolean;
 }
