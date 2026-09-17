@@ -193,6 +193,18 @@ describe("the 5xx mask", () => {
     expect(JSON.stringify(answer.body)).not.toContain("users_email_key");
   });
 
+  it("drops a masked 5xx's details entirely, whatever was put in them", () => {
+    // The trap this closes: a driver error handed straight to `details`. Postgres writes the
+    // ENTIRE failing row into its `detail` field on a CHECK or NOT NULL violation — every
+    // column, values included — so a caught driver object in `details` is a row on the wire.
+    const err = appError("INTERNAL_ERROR", "insert failed", {
+      details: { detail: "Failing row contains (someone@example.com, 4242424242424242)." },
+    });
+    const answer = errorResponse(err);
+    expect(answer.body.error).not.toHaveProperty("details");
+    expect(JSON.stringify(answer)).not.toContain("4242");
+  });
+
   it("lets an authored 5xx through, because it is what says whether to retry", () => {
     const answer = errorResponse(appError("SERVICE_UNAVAILABLE", "Metering is unavailable"));
     expect(answer.status).toBe(503);
