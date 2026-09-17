@@ -1,0 +1,214 @@
+/**
+ * The one error a route throws, and the one function that turns any thrown value into words.
+ *
+ * Extracted from six backends whose copies of this file are byte-identical in the parts that
+ * matter: `toJSON()` in four of them, `toMessage()` in six. Where they differ, the version
+ * carrying the production reason won — every comment below names a failure somebody shipped.
+ */
+import type { ApiError } from "@gusnips/http";
+
+export interface AppErrorOptions<Key extends string = string> {
+  /** What makes the refusal ACTIONABLE: the plan that lifts a 402, the scope of a quota. */
+  details?: unknown;
+  /**
+   * The stable key a client localizes. Type it against your own closed list of keys, so a
+   * typo'd or stale key is a compile error at the emit site rather than a raw dotted string
+   * in front of a reader. The WIRE type stays `string`, so an older client tolerates a key
+   * from a newer server and degrades to `message`.
+   */
+  messageKey?: Key;
+  /** Interpolation values for `messageKey`. */
+  params?: Record<string, string | number>;
+  /**
+   * Seconds until the caller may retry. Set it HERE rather than hand-rolling it into
+   * `details`: {@link errorResponse} renders it as the standard `Retry-After` header AND
+   * folds it into `details`, so an HTTP client, a proxy and your own SDK all learn the same
+   * wait from one value.
+   */
+  retryAfterSecs?: number;
+  /**
+   * The `message` was authored for the client — a deployment fact like "payments are not set
+   * up here", a named dependency that is down — so a 5xx keeps it instead of the generic
+   * sentence. Never set it on a message built from a caught error: that is where driver text
+   * lives, and one donor's whole masking policy exists because its repository layer
+   * interpolates the driver's message into every failure it raises.
+   */
+  expose?: boolean;
+  cause?: unknown;
+}
+
+/**
+ * The one error type routes throw; {@link errorResponse} formats the envelope.
+ *
+ * `Code` is your product's error-code union and `Key` its message-key union. Neither is
+ * shipped here: across six donors the factory tables hold 46 distinct code names and exactly
+ * nine appear in all six. The codes are an API's vocabulary. What this package ships is the
+ * shape, the wire format and the mask.
+ *
+ * Prefer {@link createAppError} over `new AppError(…)`: it reads the status off your own
+ * code→status map, so no call site names a status and a code added without one is a build
+ * error.
+ */
+export class AppError<Code extends string = string, Key extends string = string> extends Error {
+  public readonly statusCode: number;
+  public readonly code: Code;
+  public readonly details?: unknown;
+  public readonly messageKey?: Key;
+  public readonly params?: Record<string, string | number>;
+  public readonly retryAfterSecs?: number;
+  public readonly expose: boolean;
+
+  constructor(statusCode: number, code: Code, message: string, opts: AppErrorOptions<Key> = {}) {
+    super(message, { cause: opts.cause });
+    this.name = "AppError";
+    this.statusCode = statusCode;
+    this.code = code;
+    this.details = opts.details;
+    this.messageKey = opts.messageKey;
+    this.params = opts.params;
+    this.retryAfterSecs = opts.retryAfterSecs;
+    this.expose = opts.expose ?? false;
+  }
+
+  toJSON(): ApiError<Code> {
+    const details = this.detailsWithRetry();
+    return {
+      error: {
+        code: this.code,
+        message: this.message,
+        ...(this.messageKey !== undefined && { messageKey: this.messageKey }),
+        ...(this.params !== undefined && { params: this.params }),
+        ...(details !== undefined && { details }),
+      },
+    };
+  }
+
+  /**
+   * `retryAfterSecs` also rides inside `details`, because that is where clients already look.
+   *
+   * Only an object `details` can carry it. Spreading an ARRAY — a list of validation issues —
+   * turns it into `{"0": …}` and breaks every client that parses it; spreading a STRING turns
+   * it into one key per character. Anything that is not a plain object is handed back
+   * untouched, and the header still tells that caller when to come back.
+   */
+  private detailsWithRetry(): unknown {
+    if (this.retryAfterSecs === undefined) return this.details;
+    const carries =
+      this.details === undefined ||
+      (typeof this.details === "object" && this.details !== null && !Array.isArray(this.details));
+    if (!carries) return this.details;
+    return { ...this.details, retryAfterSecs: this.retryAfterSecs };
+  }
+}
+
+/**
+ * A map is widened to `Record<string, number>` unless it is declared `as const`, and a widened
+ * map cannot tell a 429 from a 404 — so the rule below would silently stop applying. Refusing
+ * the map is loud; accepting it with the guard switched off is the failure this package spends
+ * a paragraph on everywhere else.
+ */
+type LiteralStatuses<S> = number extends S[keyof S]
+  ? { "declare your code→status map `as const`": never }
+  : S;
+
+/**
+ * Extra options a code's status makes mandatory.
+ *
+ * **A 429 states its own wait.** This is the highest-value line extracted from the whole
+ * reading. One donor writes a `resetAt` ISO date that no HTTP client parses, and then needs a
+ * hand-maintained list of "codes that do not clear by waiting" in its browser app to
+ * compensate — its own comment says so. Another donor needs no such list, because every 429 it
+ * sends states its wait, and a stated wait answers the question the list was guessing at. A
+ * third raises a spent DAILY cap with no wait at all, on a code its client treats as transient,
+ * so the browser retries a limit that clears at midnight — twice, immediately.
+ *
+ * Making the wait a required argument deletes that list from three repos and makes the retry
+ * bug unrepresentable. It costs one edit per 429 call site and can never regress.
+ */
+type RequiredOptions<Status, Key extends string> = Status extends 429
+  ? [opts: AppErrorOptions<Key> & { retryAfterSecs: number }]
+  : [opts?: AppErrorOptions<Key>];
+
+/**
+ * Binds your code→status map, and returns the factory your `errors.*` table calls.
+ *
+ * ```ts
+ * const ERROR_STATUS = {
+ *   NOT_FOUND: 404,
+ *   RATE_LIMIT_EXCEEDED: 429,
+ * } as const satisfies Record<ErrorCode, number>;
+ *
+ * const appError = createAppError<typeof ERROR_STATUS, MessageKey>(ERROR_STATUS);
+ *
+ * export const errors = {
+ *   notFound: (what = "Resource") => appError("NOT_FOUND", `${what} not found`),
+ *   rateLimit: (retryAfterSecs: number) =>
+ *     appError("RATE_LIMIT_EXCEEDED", "Too many requests", { retryAfterSecs }),
+ * };
+ * ```
+ *
+ * The `satisfies` on your map is what makes a code with no status a build error — one line,
+ * in your repo, and the only version of this that cannot drift. Three of the five newest
+ * donors pass the status at every call site instead, which compiles no matter what.
+ */
+export function createAppError<S extends Record<string, number>, Key extends string = string>(
+  statusOf: S & LiteralStatuses<S>,
+): <C extends keyof S & string>(
+  code: C,
+  message: string,
+  ...opts: RequiredOptions<S[C], Key>
+) => AppError<C, Key> {
+  return (code, message, ...opts) =>
+    // A code with no status is a build error at your `satisfies`. One reaching here anyway —
+    // a map assembled at runtime, a code narrowed off the wire — is our bug, not the caller's.
+    new AppError(statusOf[code] ?? 500, code, message, opts[0]);
+}
+
+/**
+ * `JSON.stringify` that never throws and never answers `"[object Object]"`.
+ *
+ * Private on purpose: it exists for {@link toMessage}'s last branch. A logger wants a richer
+ * one (an allow-list over an error's own fields), which is a different function.
+ */
+function safeStringify(value: unknown): string {
+  const seen = new WeakSet<object>();
+  try {
+    return (
+      JSON.stringify(value, (_key, val: unknown) => {
+        if (val instanceof Error) return { name: val.name, message: val.message };
+        if (typeof val === "bigint") return val.toString();
+        if (typeof val === "object" && val !== null) {
+          if (seen.has(val)) return "[Circular]";
+          seen.add(val);
+        }
+        return val;
+      }) ?? "null"
+    );
+  } catch {
+    return "[unserializable]";
+  }
+}
+
+/**
+ * Turn any thrown value into a string.
+ *
+ * The single home for the `err instanceof Error ? err.message : String(err)` idiom, which is
+ * wrong twice over and shipped that way in six repos:
+ *
+ * 1. A data layer rejects with a PLAIN OBJECT — `{code, message, hint}` is what PostgREST and
+ *    several drivers throw — so the useful text is in `message` and `String()` never reads it.
+ *    Six donors fixed this half.
+ * 2. An object with no string `message` still flattens to `"[object Object]"`, which is the
+ *    real failure masked by a useless string. One donor fixed that half and named it exactly:
+ *    *"masking the real failure."* Its version is the one here.
+ */
+export function toMessage(err: unknown): string {
+  if (err instanceof Error) return err.message;
+  if (typeof err === "string") return err;
+  if (typeof err === "object" && err !== null) {
+    const { message } = err as { message?: unknown };
+    if (typeof message === "string") return message;
+    return safeStringify(err);
+  }
+  return String(err);
+}

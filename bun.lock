@@ -36,6 +36,9 @@
     "server": {
       "name": "@gusnips/server",
       "version": "0.0.0",
+      "dependencies": {
+        "@gusnips/http": "^0.1.0",
+      },
       "devDependencies": {
         "@types/node": "^24.12.0",
         "hono": "^4.10.6",
@@ -68,6 +71,8 @@
     "@eslint/object-schema": ["@eslint/object-schema@2.1.7", "", {}, "sha512-VtAOaymWVfZcmZbp6E2mympDIHvyjXs/12LqWYjVw6qjrfF+VK+fyG33kChz3nnK+SU5/NeHOqrTEHS8sXO3OA=="],
 
     "@eslint/plugin-kit": ["@eslint/plugin-kit@0.4.1", "", { "dependencies": { "@eslint/core": "^0.17.0", "levn": "^0.4.1" } }, "sha512-43/qtrDUokr7LJqoF2c3+RInu/t4zfrpYdoSDfYyhg52rwLV6TnOvdG4fXm7IkSB3wErkcmJS9iEhjVtOSEjjA=="],
+
+    "@gusnips/http": ["@gusnips/http@0.1.0", "", {}, "sha512-owqYWH9DqxJUIbqGUCR/n6a3wA+AIENMwOOSQb71EJxBWCiadjUtTn7fpulSMRDhlXCasS+pKJmNb3xQyHAMPw=="],
 
     "@gusnips/migrate": ["@gusnips/migrate@workspace:migrate"],
 
