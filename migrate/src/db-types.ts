@@ -47,6 +47,7 @@ export interface ColumnRow {
   is_nullable: "YES" | "NO";
   column_default: string | null;
   is_identity: "YES" | "NO";
+  identity_generation: "ALWAYS" | "BY DEFAULT" | null;
   is_generated: "NEVER" | "ALWAYS";
   data_type: string;
   udt_name: string;
@@ -102,7 +103,7 @@ export async function readCatalog(client: Client, schema: string): Promise<Catal
     // the migrations: a column added later sorts last even if a dump would put it elsewhere.
     const { rows } = await client.query<ColumnRow>(
       `SELECT c.table_name, c.column_name, c.is_nullable, c.column_default,
-              c.is_identity, c.is_generated, c.data_type, c.udt_name
+              c.is_identity, c.identity_generation, c.is_generated, c.data_type, c.udt_name
          FROM information_schema.columns c
          JOIN information_schema.tables t
            ON t.table_schema = c.table_schema AND t.table_name = c.table_name
@@ -251,11 +252,19 @@ export function renderTypes(catalog: Catalog, schema: string, shape: TypesShape)
       ? `${scalar(column.udt_name.replace(/^_/, ""))}[]`
       : scalar(column.udt_name);
   const nullable = (column: ColumnRow) => (column.is_nullable === "YES" ? " | null" : "");
-  const fields = (columns: ColumnRow[], optional: (column: ColumnRow) => boolean) =>
+  const fields = (
+    columns: ColumnRow[],
+    optional: (column: ColumnRow) => boolean,
+    forWrite = false,
+  ) =>
     columns
-      .map(
-        (column) =>
-          `${COL}${key(column.column_name)}${optional(column) ? "?" : ""}: ${tsType(column)}${nullable(column)};`,
+      .map((column) =>
+        // Postgres refuses a value for a generated column and for an identity column that is
+        // GENERATED ALWAYS ("cannot insert a non-DEFAULT value"). Typed `?: T`, a write of one
+        // typechecked and failed at runtime; `?: never` refuses it at compile time.
+        forWrite && (column.is_generated === "ALWAYS" || column.identity_generation === "ALWAYS")
+          ? `${COL}${key(column.column_name)}?: never;`
+          : `${COL}${key(column.column_name)}${optional(column) ? "?" : ""}: ${tsType(column)}${nullable(column)};`,
       )
       .join("\n");
 
@@ -270,8 +279,9 @@ export function renderTypes(catalog: Catalog, schema: string, shape: TypesShape)
         column.column_default !== null ||
         column.is_identity === "YES" ||
         column.is_generated === "ALWAYS",
+      true,
     );
-    const update = fields(columns, () => true);
+    const update = fields(columns, () => true, true);
     return `${TBL}${key(name)}: {
 ${SUB}Row: {
 ${row}
