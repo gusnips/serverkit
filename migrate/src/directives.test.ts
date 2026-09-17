@@ -67,6 +67,18 @@ describe("readDirectives", () => {
     );
   });
 
+  it("refuses the old @manual marker anywhere in the file, not only at the top", () => {
+    // Six old runners matched it on any line. A file marked below its first statement was held
+    // there, and read only from the top it would stop being held and apply on the next deploy.
+    expect(() =>
+      readDirectives(
+        "190_drop.sql",
+        "ALTER TABLE t ADD COLUMN y int;\n  -- @manual\nDROP TABLE u;",
+      ),
+    ).toThrow(/190_drop\.sql, line 2: "-- @manual" is no longer read/);
+    expect(() => readDirectives("a.sql", "SELECT 1;\n-- @MANUAL\n")).toThrow(/no longer read/);
+  });
+
   it("ignores a byte order mark", () => {
     expect(readDirectives("a.sql", "\uFEFF-- migrate: manual\nSELECT 1;").manual).toBe(true);
   });

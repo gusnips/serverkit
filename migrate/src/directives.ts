@@ -13,8 +13,8 @@
  * in four of them and "gated and never in a transaction" in six. Any single meaning silently
  * changes one family's files: a `DROP COLUMN` on customer data, written for the first meaning,
  * would run with no transaction under the second. So the old marker is not read at all. It is an
- * error that names both replacements, because a file that quietly stops being gated is applied by
- * the next deploy.
+ * error that names both replacements, on any line of the file, because a file that quietly stops
+ * being gated is applied by the next deploy.
  *
  * Only the leading comment block counts. A comment further down that quotes a directive is prose
  * about it, and a whole-file search would flip that file's behaviour. A directive-shaped line after
@@ -45,6 +45,15 @@ export function readDirectives(file: string, sql: string): Directives {
     const line = raw.trim();
     if (inLeadingBlock && line !== "" && !line.startsWith("--")) inLeadingBlock = false;
 
+    // Checked on every line, not only in the leading block: the runners that read it matched it
+    // anywhere, so a marker below the first statement held that file, and it must not go quiet.
+    if (LEGACY_MANUAL.test(line))
+      throw new Error(
+        `${file}, line ${String(index + 1)}: "-- @manual" is no longer read. Write ` +
+          `"-- migrate: manual" at the top of the file to hold it until a run with --manual. Add ` +
+          `"-- migrate: no-transaction" as well only if its statements cannot run in a transaction.`,
+      );
+
     const match = DIRECTIVE.exec(line);
     if (!inLeadingBlock) {
       if (match)
@@ -55,12 +64,6 @@ export function readDirectives(file: string, sql: string): Directives {
       continue;
     }
 
-    if (LEGACY_MANUAL.test(line))
-      throw new Error(
-        `${file}, line ${String(index + 1)}: "-- @manual" is no longer read. Write ` +
-          `"-- migrate: manual" to hold the file until a run with --manual. Add ` +
-          `"-- migrate: no-transaction" as well only if its statements cannot run in a transaction.`,
-      );
     if (!match) continue;
 
     const name = match[1] ?? "";
