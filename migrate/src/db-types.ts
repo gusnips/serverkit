@@ -118,6 +118,11 @@ export async function readCatalog(client: Client, schema: string): Promise<Catal
 
   // Outgoing foreign keys per table. supabase-js reads them to type embedded selects in both
   // directions. `unnest … WITH ORDINALITY` pairs each column with the column it references.
+  //
+  // Only keys whose target is in this schema. A relationship names its target by bare relation
+  // name, so `REFERENCES auth.users` used to read as a relationship to `users` here: a
+  // self-relationship of app.users where that table exists, a relation that does not exist where
+  // it does not. Both typecheck an embed PostgREST then refuses.
   const { rows: fkRows } = await client.query<{
     table_name: string;
     fk_name: string;
@@ -134,11 +139,12 @@ export async function readCatalog(client: Client, schema: string): Promise<Catal
        JOIN pg_class cl ON cl.oid = con.conrelid
        JOIN pg_namespace ns ON ns.oid = cl.relnamespace
        JOIN pg_class clf ON clf.oid = con.confrelid
+       JOIN pg_namespace nsf ON nsf.oid = clf.relnamespace
        JOIN unnest(con.conkey) WITH ORDINALITY AS lk(attnum, ord) ON true
        JOIN pg_attribute att ON att.attrelid = con.conrelid AND att.attnum = lk.attnum
        JOIN unnest(con.confkey) WITH ORDINALITY AS fk(attnum, ord) ON fk.ord = lk.ord
        JOIN pg_attribute attf ON attf.attrelid = con.confrelid AND attf.attnum = fk.attnum
-      WHERE con.contype = 'f' AND ns.nspname = $1
+      WHERE con.contype = 'f' AND ns.nspname = $1 AND nsf.nspname = $1
       ORDER BY cl.relname, con.conname, lk.ord`,
     [schema],
   );

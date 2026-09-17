@@ -207,3 +207,33 @@ describe("db-types CLI", () => {
     expect(run.log.text()).toContain("has no tables this role can see");
   });
 });
+
+describe("foreign keys into another schema", () => {
+  let other: TestDatabase;
+
+  beforeAll(async () => {
+    other = await freshDatabase();
+    await other.query(`
+      CREATE SCHEMA auth;
+      CREATE TABLE auth.users (id uuid PRIMARY KEY);
+      CREATE SCHEMA app;
+      CREATE TABLE app.users (id uuid PRIMARY KEY REFERENCES auth.users (id));
+      CREATE TABLE app.notes (id int PRIMARY KEY, author uuid REFERENCES app.users (id));
+    `);
+  });
+
+  afterAll(async () => {
+    await other.drop();
+  });
+
+  it("are left out, so auth.users never reads as app.users", async () => {
+    // The `Database` type describes one schema, so a relationship can only name a relation in it.
+    // Emitted with its bare name, `REFERENCES auth.users` became a self-relationship of app.users,
+    // and `from("users").select("*, users(*)")` typechecked against a join PostgREST refuses.
+    const { text } = await generateTypes({ databaseUrl: other.url });
+    expect(text).not.toContain("users_id_fkey");
+    expect(text).toContain(
+      '{ foreignKeyName: "notes_author_fkey"; columns: ["author"]; isOneToOne: false; referencedRelation: "users"; referencedColumns: ["id"]; }',
+    );
+  });
+});
