@@ -324,7 +324,7 @@ ${TBL}};`;
   const alias = `${schema.charAt(0).toUpperCase()}${schema.slice(1)}Schema`;
   const header = `// ---------------------------------------------------------------------------
 // AUTO-GENERATED — DO NOT EDIT BY HAND.
-// Regenerate after a schema change with db-types from @gusnips/migrate.
+// Regenerate after a schema change with \`gusnips-migrate db-types\`.
 // Source: live Postgres \`${schema}\` schema, shape \`${shape}\`.
 // ---------------------------------------------------------------------------
 

@@ -132,7 +132,7 @@ describe("generateTypes, supabase shape", () => {
     expect(first.text.split("\n").slice(0, 5)).toEqual([
       "// ---------------------------------------------------------------------------",
       "// AUTO-GENERATED — DO NOT EDIT BY HAND.",
-      "// Regenerate after a schema change with db-types from @gusnips/migrate.",
+      "// Regenerate after a schema change with `gusnips-migrate db-types`.",
       "// Source: live Postgres `app` schema, shape `supabase`.",
       "// ---------------------------------------------------------------------------",
     ]);

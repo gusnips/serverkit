@@ -9,7 +9,7 @@ bun add @gusnips/migrate pg
 ```
 
 ```bash
-DATABASE_URL=postgresql://postgres@localhost:5432/app bunx migrate --dir migrations
+DATABASE_URL=postgresql://postgres@localhost:5432/app bunx gusnips-migrate --dir migrations
 ```
 
 ```
@@ -149,7 +149,7 @@ requireLocalDatabase("SEED", process.env.DATABASE_URL, { tunnelPort: 5434 });
 ## Types
 
 ```bash
-db-types --out src/database.types.ts
+bunx gusnips-migrate db-types --out src/database.types.ts
 ```
 
 It reads the `app` schema and writes a `Database` type for supabase-js: `Row`, `Insert`, `Update`
@@ -168,7 +168,8 @@ The output has no timestamp, so the same schema always gives the same bytes. It 
 4-space indents and double quotes; pass your own formatter to match your repo:
 
 ```bash
-db-types --out src/database.types.ts --format "bunx prettier --stdin-filepath src/database.types.ts"
+bunx gusnips-migrate db-types --out src/database.types.ts \
+  --format "bunx prettier --stdin-filepath src/database.types.ts"
 ```
 
 `--check` compares after `--format`, because the file you commit is the formatted one.
@@ -181,13 +182,18 @@ because Postgres refuses a value for them. Foreign keys into another schema, lik
 
 A Supabase project already has the `anon`, `authenticated` and `service_role` roles, `auth.users`,
 `auth.identities`, `auth.uid()` and `auth.role()`. A stock Postgres does not, so migrations written
-for Supabase fail at their first `GRANT`. `supabase-stand-in` creates them:
+for Supabase fail at their first `GRANT`. `gusnips-migrate supabase-stand-in` creates them:
 
 ```yaml
-- run: bunx supabase-stand-in
-- run: bunx migrate --dir apps/api/migrations --manual --yes
-- run: bunx db-types --out src/database.types.ts --format "bunx prettier --stdin-filepath src/database.types.ts" --check
+- run: bun install --frozen-lockfile
+- run: bunx gusnips-migrate supabase-stand-in
+- run: bunx gusnips-migrate --dir apps/api/migrations --manual --yes
+- run: bunx gusnips-migrate db-types --out src/database.types.ts --format "bunx prettier --stdin-filepath src/database.types.ts" --check
 ```
+
+`bunx gusnips-migrate` runs the copy the install put in `node_modules`. Where the package is not
+installed, write `bunx -p @gusnips/migrate gusnips-migrate`. Without `-p`, bunx looks for a package
+named after the command, and whoever owns that name on npm gets to run with your `DATABASE_URL`.
 
 It refuses any database that is not on this machine, and running it twice changes nothing. The SQL
 is also at `@gusnips/migrate/supabase-stand-in.sql` for `psql -f`.

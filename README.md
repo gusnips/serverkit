@@ -7,7 +7,7 @@ bun add @gusnips/migrate pg
 ```
 
 ```bash
-DATABASE_URL=postgresql://postgres@localhost:5432/app bunx migrate --dir migrations
+DATABASE_URL=postgresql://postgres@localhost:5432/app bunx gusnips-migrate --dir migrations
 ```
 
 That applies every `.sql` file in `migrations/` that has not run yet, in order, each in its own

@@ -27,7 +27,7 @@ const FLAGS: FlagSpec = {
 
 export const MIGRATE_USAGE = `Apply the .sql migrations in a folder, in order, one transaction per file.
 
-Usage: migrate --dir <folder> [flags]
+Usage: gusnips-migrate --dir <folder> [flags]
 
   --manual              Also apply files marked "-- migrate: manual". Asks first, unless --yes.
   --yes, -y             Skip those questions, and allow a remote database. MIGRATE_CONFIRM=1 does the same.
@@ -39,7 +39,11 @@ Usage: migrate --dir <folder> [flags]
   --tunnel-port <port>  A local port that tunnels to a remote database. Applying there needs --yes.
   --types-command <cmd> The command --types runs, e.g. "bun run db:types".
 
-Reads DATABASE_URL.`;
+Reads DATABASE_URL.
+
+Other commands:
+  gusnips-migrate db-types --out <file>   Write TypeScript types for a schema.
+  gusnips-migrate supabase-stand-in       Give a local Postgres the Supabase roles and auth tables.`;
 
 /**
  * Parse the command line into `runMigrations` and return the exit code.

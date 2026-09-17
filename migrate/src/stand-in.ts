@@ -22,7 +22,7 @@ export async function applySupabaseStandIn(client: Client): Promise<void> {
 export const STAND_IN_USAGE = `Give a stock Postgres the roles and auth tables a Supabase database starts with, so
 migrations written for Supabase can be replayed in CI.
 
-Usage: supabase-stand-in
+Usage: gusnips-migrate supabase-stand-in
 
 Reads DATABASE_URL, and refuses anything but a database on this machine.`;
 

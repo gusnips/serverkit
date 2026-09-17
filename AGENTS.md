@@ -33,7 +33,7 @@ serverkit/
 │   │   ├── lines.ts      ← the lines deploy workflows grep. Changing one breaks a workflow.
 │   │   ├── db-types.ts   ← the generator; db-types-cli.ts is its command
 │   │   ├── stand-in.ts   ← applies sql/supabase-stand-in.sql to a local database
-│   │   ├── bin/          ← three two-line bins
+│   │   ├── bin/          ← one bin, gusnips-migrate, which dispatches its two commands
 │   │   └── test/         ← the throwaway-database helpers the tests share
 │   └── sql/              ← supabase-stand-in.sql, also exported for `psql -f`
 ├── scripts/
@@ -133,19 +133,27 @@ When one fails, a lesson is being unlearned.
     script, because the runner script runs on import.
 15. **Types regenerate only after a run that applied something, and only after the client has
     closed.** One donor's wrapper regenerated types after `--status` too.
+16. **One bin, and its name starts with `gusnips-`.** The first build shipped `migrate`, `db-types`
+    and `supabase-stand-in`. The first two are unrelated packages on npm, and anyone can register
+    the third, so the README's own `bunx migrate`, run in a CI job without this package installed,
+    would download a stranger's code and run it with `DATABASE_URL` in its environment. Generic
+    names also collide in an adopter's `node_modules/.bin`. `db-types` and `supabase-stand-in` are
+    commands under `gusnips-migrate`, read from the first argument before any flag parsing, so an
+    unknown flag or a command name anywhere else is still an error. `release:check` refuses a bin
+    without the prefix.
 
 ### …and four for `db-types`
 
-16. **The output has no timestamp.** The same schema gives the same bytes, which is the only way
+17. **The output has no timestamp.** The same schema gives the same bytes, which is the only way
     `--check` can compare. `--check` compares after `--format`, because the committed file is the
     formatted one.
-17. **A foreign key into another schema is left out of `Relationships`.** The `Database` type
+18. **A foreign key into another schema is left out of `Relationships`.** The `Database` type
     describes one schema, so the donor generators emitted `REFERENCES auth.users` as a relationship
     to the schema's own `users` table, and a join PostgREST refuses typechecked.
-18. **Generated columns and identity `GENERATED ALWAYS` columns are `?: never` in `Insert` and
+19. **Generated columns and identity `GENERATED ALWAYS` columns are `?: never` in `Insert` and
     `Update`.** Postgres refuses a value for them, so `?: T` typechecked an insert that failed at
     runtime.
-19. **`money` and `halfvec` map to `string`.** `money`'s text form is `$1.00`, which is not a JSON
+20. **`money` and `halfvec` map to `string`.** `money`'s text form is `$1.00`, which is not a JSON
     number.
 
 ### The SSL helper

@@ -18,9 +18,7 @@
   },
   "types": "./dist/index.d.ts",
   "bin": {
-    "migrate": "./dist/bin/migrate.js",
-    "db-types": "./dist/bin/db-types.js",
-    "supabase-stand-in": "./dist/bin/supabase-stand-in.js"
+    "gusnips-migrate": "./dist/bin/gusnips-migrate.js"
   },
   "files": [
     "dist",

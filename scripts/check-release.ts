@@ -12,6 +12,9 @@
  * - every `dist` file has a `src` file behind it (tsc never deletes output from a rename);
  * - no dependency range is `workspace:`, and a sibling is pinned to its current version;
  * - every `exports` target and every `bin` is in the tarball, and each bin starts with a shebang;
+ * - every bin name starts with `gusnips-`. A bare name like `migrate` belongs to someone else on
+ *   npm, so `bunx migrate` in a job without this package installed downloads and runs a stranger's
+ *   code with that job's DATABASE_URL, and two generic names collide in an adopter's `.bin`;
  * - the unpacked tarball imports and runs under plain `node`, with only its peer installed. That is
  *   the one check that proves no Bun-only global reached the published code.
  *
@@ -26,6 +29,11 @@ import { fileURLToPath } from "node:url";
 
 const ROOT = join(fileURLToPath(import.meta.url), "..", "..");
 const PACKAGES = ["migrate"];
+
+/** The commands a bin dispatches to. Each one is run with `--help` from the unpacked tarball. */
+const COMMANDS: Record<string, string[]> = {
+  "gusnips-migrate": ["db-types", "supabase-stand-in"],
+};
 
 interface Manifest {
   name: string;
@@ -90,6 +98,11 @@ try {
           problems.push(`${name} exports "${subpath}" as ${path}, which is not in the tarball.`);
 
     for (const [bin, path] of Object.entries(packed.bin ?? {})) {
+      if (!bin.startsWith("gusnips-"))
+        problems.push(
+          `${name} declares the bin "${bin}". Name it "gusnips-…": with the package not installed, ` +
+            `\`bunx ${bin}\` runs whatever npm package owns that name.`,
+        );
       if (!has(path)) {
         problems.push(`${name} declares the bin "${bin}" as ${path}, which is not in the tarball.`);
         continue;
@@ -132,10 +145,14 @@ try {
       problems.push(`${name} does not import under node: ${String(err)}`);
     }
     for (const [bin, path] of Object.entries(packed.bin ?? {})) {
-      try {
-        run("node", [join(target, path), "--help"], install);
-      } catch (err) {
-        problems.push(`${name}'s bin "${bin}" does not run under node: ${String(err)}`);
+      for (const command of [[], ...(COMMANDS[bin] ?? []).map((each) => [each])]) {
+        try {
+          run("node", [join(target, path), ...command, "--help"], install);
+        } catch (err) {
+          problems.push(
+            `${name}'s bin "${[bin, ...command].join(" ")}" does not run under node: ${String(err)}`,
+          );
+        }
       }
     }
 

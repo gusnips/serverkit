@@ -91,16 +91,46 @@ describe("migrateCli", () => {
 });
 
 describe("the bin", () => {
+  const bin = fileURLToPath(new URL("./bin/gusnips-migrate.ts", import.meta.url));
   // Plain node, no Bun: nothing in the package may lean on a Bun-only global, and the runner must
   // not need anything from an app's environment beyond DATABASE_URL.
-  it("runs under node with only DATABASE_URL set", async () => {
-    const bin = fileURLToPath(new URL("./bin/migrate.ts", import.meta.url));
-    const { stdout } = await promisify(execFile)(
-      "node",
-      ["--experimental-strip-types", "--no-warnings", bin, "--dir", dir],
-      { env: { PATH: process.env.PATH ?? "", DATABASE_URL: db.url } },
-    );
+  const run = async (argv: string[]) => {
+    try {
+      const { stdout, stderr } = await promisify(execFile)(
+        "node",
+        ["--experimental-strip-types", "--no-warnings", bin, ...argv],
+        { env: { PATH: process.env.PATH ?? "", DATABASE_URL: db.url } },
+      );
+      return { code: 0, stdout, stderr };
+    } catch (err) {
+      const failed = err as { code?: number; stdout?: string; stderr?: string };
+      return { code: failed.code ?? -1, stdout: failed.stdout ?? "", stderr: failed.stderr ?? "" };
+    }
+  };
+
+  it("runs the runner under node with only DATABASE_URL set", async () => {
+    const { code, stdout } = await run(["--dir", dir]);
+    expect(code).toBe(0);
     expect(stdout).toContain("✓ Applied 1_a.sql.");
     expect(await applied()).toBe(true);
+  });
+
+  it("reads db-types and supabase-stand-in as commands, first thing on the line only", async () => {
+    const [types, standIn, late, unknown] = await Promise.all([
+      run(["db-types", "--help"]),
+      run(["supabase-stand-in", "--help"]),
+      run(["--dir", dir, "db-types"]),
+      run(["--dir", dir, "--dry-run"]),
+    ]);
+    expect(types.code).toBe(0);
+    expect(types.stdout).toContain("Usage: gusnips-migrate db-types --out <file>");
+    expect(standIn.code).toBe(0);
+    expect(standIn.stdout).toContain("Usage: gusnips-migrate supabase-stand-in");
+    // Anywhere else, a command name is a stray argument and the runner refuses it.
+    expect(late.code).toBe(1);
+    expect(late.stderr).toContain('[MIGRATIONS] Unexpected argument "db-types".');
+    expect(unknown.code).toBe(1);
+    expect(unknown.stderr).toContain('[MIGRATIONS] Unknown flag "--dry-run".');
+    expect(await applied()).toBe(false);
   });
 });

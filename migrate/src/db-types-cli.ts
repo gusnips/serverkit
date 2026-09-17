@@ -19,7 +19,7 @@ const FLAGS: FlagSpec = {
 
 export const DB_TYPES_USAGE = `Write TypeScript types for a Postgres schema.
 
-Usage: db-types --out <file> [flags]
+Usage: gusnips-migrate db-types --out <file> [flags]
 
   --out <file>        Where the types go.
   --schema <name>     The schema to read. Default: app.
