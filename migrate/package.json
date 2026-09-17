@@ -1,0 +1,74 @@
+{
+  "name": "@gusnips/migrate",
+  "version": "0.1.0",
+  "description": "Plain SQL migrations for Postgres, one transaction per file, plus a type generator and a Supabase stand-in for CI.",
+  "type": "module",
+  "license": "MIT",
+  "author": "Gustavo Salomé",
+  "homepage": "https://github.com/gusnips/serverkit/tree/main/migrate#readme",
+  "bugs": {
+    "url": "https://github.com/gusnips/serverkit/issues"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./supabase-stand-in.sql": "./sql/supabase-stand-in.sql"
+  },
+  "types": "./dist/index.d.ts",
+  "bin": {
+    "migrate": "./dist/bin/migrate.js",
+    "db-types": "./dist/bin/db-types.js",
+    "supabase-stand-in": "./dist/bin/supabase-stand-in.js"
+  },
+  "files": [
+    "dist",
+    "src",
+    "sql",
+    "README.md",
+    "LICENSE"
+  ],
+  "sideEffects": false,
+  "engines": {
+    "node": ">=22"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "keywords": [
+    "postgres",
+    "migrations",
+    "sql",
+    "supabase",
+    "typescript",
+    "types"
+  ],
+  "scripts": {
+    "build": "rm -rf dist && tsc -p tsconfig.build.json",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "lint": "eslint src",
+    "sync:docs": "cp ../LICENSE .",
+    "prepublishOnly": "bun run lint && bun run typecheck && bun run test && bun run build && bun run sync:docs",
+    "release:patch": "bun pm version patch && bun publish --access public",
+    "release:minor": "bun pm version minor && bun publish --access public",
+    "release:major": "bun pm version major && bun publish --access public"
+  },
+  "peerDependencies": {
+    "pg": ">=8.21 <9"
+  },
+  "devDependencies": {
+    "@types/node": "^24.12.0",
+    "@types/pg": "^8.15.6",
+    "pg": "^8.23.0",
+    "typescript": "^5.9.3",
+    "vitest": "^4.1.2"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/gusnips/serverkit.git",
+    "directory": "migrate"
+  }
+}
