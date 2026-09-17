@@ -22,6 +22,12 @@ type MessageKey = "serverErrors.notFound" | "serverErrors.rateLimit";
 const appError = createAppError<typeof ERROR_STATUS, MessageKey>(ERROR_STATUS);
 const spent = { details: { scope: "month" } };
 
+// Annotated, not inferred: a code narrowed off a lookup table or a switch has a UNION type,
+// which is the shape the rule used to lose.
+const mixedCode: "NOT_FOUND" | "RATE_LIMIT_EXCEEDED" = "RATE_LIMIT_EXCEEDED";
+const safeCodes: "NOT_FOUND" | "INTERNAL_ERROR" = "NOT_FOUND";
+const fromConfig: number = 429;
+
 describe("a 429 states its own wait", () => {
   it("reads the status off the map, and keeps the wait", () => {
     const err = appError("RATE_LIMIT_EXCEEDED", "Too many requests", { retryAfterSecs: 30 });
@@ -32,6 +38,14 @@ describe("a 429 states its own wait", () => {
       retryAfterSecs: null,
     });
     expect(durable.retryAfterSecs).toBeNull();
+    // A union whose status set includes 429 owes the wait too, and one that cannot be a 429
+    // does not. Both directions, because only the pair proves the tuple wrappers.
+    expect(appError(mixedCode, "slow", { retryAfterSecs: 5 }).message).toBe("slow");
+    expect(appError(safeCodes, "gone").message).toBe("gone");
+    // Any status may state a wait voluntarily — a 503 that knows its own expiry, say. Only the
+    // OBLIGATION is 429-only.
+    const configured = appError("INTERNAL_ERROR", "Not configured here", { retryAfterSecs: null });
+    expect(configured.retryAfterSecs).toBeNull();
     expect(appError("NOT_FOUND", "Workspace not found").statusCode).toBe(404);
     expect(appError("INTERNAL_ERROR", "boom").statusCode).toBe(500);
   });
@@ -62,9 +76,21 @@ function refusals(): void {
   // @ts-expect-error — nor can spreading an object whose wait is optional.
   appError("RATE_LIMIT_EXCEEDED", "x", { ...partial });
 
+  // A code narrowed to a UNION used to drop the obligation: the conditional distributed, one
+  // arm had the options optional, and an empty argument list satisfied it. That is the shape a
+  // code read off a lookup table or a switch actually has — the hardest one to eyeball.
+  // @ts-expect-error — the union's status set includes 429, so the wait is still owed.
+  appError(mixedCode, "slow");
+
   const widened: Record<string, number> = { RATE_LIMIT_EXCEEDED: 429 };
   // @ts-expect-error — without `as const` every value is `number`, so the rule above would
   // compile away silently. Refusing the map is the loud version.
   createAppError(widened);
+
+  // The realistic way a map widens: ONE status read from config. `404 | number` absorbs to
+  // `number`, and the whole map loses its literals.
+  const half = { NOT_FOUND: 404, RATE_LIMIT_EXCEEDED: fromConfig } as const;
+  // @ts-expect-error — half-widened is widened.
+  createAppError<typeof half>(half);
 }
 void refusals;

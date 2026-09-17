@@ -55,6 +55,10 @@ export interface AppErrorOptions<Key extends string = string> {
  * code→status map, so no call site names a status and a code added without one is a build
  * error.
  *
+ * Constructing one directly is the one path where a 429 with no wait is still representable:
+ * the rule lives on the factory, because only the factory knows the map. That is the reason to
+ * prefer it, not a style note.
+ *
  * **There is no `toJSON()`, on purpose.** `JSON.stringify` calls a value's own `toJSON()`
  * BEFORE it calls the replacer, so a class that defines one never reaches a logger's `Error`
  * branch at all. Seven backends define one here, and every one of them logs
@@ -90,9 +94,14 @@ export class AppError<Code extends string = string, Key extends string = string>
  * map cannot tell a 429 from a 404 — so the rule below would silently stop applying. Refusing
  * the map is loud; accepting it with the guard switched off is the failure this package spends
  * a paragraph on everywhere else.
+ *
+ * It catches the HALF-widened map too, which is the realistic way this happens: one status read
+ * from config turns `404 | number` into `number`, and the whole map loses its literals. The
+ * property name is what the compiler prints, so it is plain ASCII — an arrow there comes out as
+ * `\u2192` in the diagnostic, and the message is the entire point of the trick.
  */
 type LiteralStatuses<S> = number extends S[keyof S]
-  ? { "declare your code→status map `as const`": never }
+  ? { "declare your code-to-status map as const": never }
   : S;
 
 /**
@@ -110,6 +119,24 @@ type LiteralStatuses<S> = number extends S[keyof S]
  * unrepresentable. Measured against the fleet it came from: of 40 places that raise a 429,
  * **34 already state a wait**, so the rule costs six edits in six repos.
  *
+ * It is `[429] extends [Status]`, not `Status extends 429`, because the second form distributes:
+ * a code narrowed to a UNION — off a lookup table, a switch, a value read from the wire —
+ * produced a union of argument tuples, one of which had the options optional, and an empty
+ * argument list satisfied it. The obligation vanished on exactly the shape that is hardest to
+ * read. The tuples stop the distribution, and they ask the better question: does this code's
+ * status set INCLUDE 429. A widened `number` then requires the wait everywhere rather than
+ * nowhere, which is the safe direction to fail.
+ *
+ * Deliberately not extended to 503, and the same counting method is what settled it: of 94
+ * raises of a 502/503/504 factory across six repos, **16 state a wait and 78 do not** — the
+ * inverse of the 429 ratio. Most are "the database is unreachable" or "payments are not
+ * configured here", which have no wait to state, so the rule would buy 78 `null`s and teach
+ * people to type one without reading. The capability is there for the raiser that does know:
+ * `retryAfterSecs` is on every code, a number renders `Retry-After` at any status, and an
+ * explicit `null` says "durable" — which is the answer to a client that cannot otherwise tell
+ * a 503 meaning "not configured on this deployment" from one meaning "did not answer just now".
+ * Available, not compulsory.
+ *
  * `null` is the other half, and the six are what proved it necessary. Two of them cannot state
  * a wait truthfully: a concurrency slot frees when somebody else's job finishes, and a cap on
  * live objects clears by archiving one, never by waiting at all. A required `number` would have
@@ -117,7 +144,7 @@ type LiteralStatuses<S> = number extends S[keyof S]
  * question the code lists were guessing at, answered by the one place that knows: the raiser.
  * An omission is invisible in a diff; a `null` is a claim somebody has to read.
  */
-type RequiredOptions<Status, Key extends string> = Status extends 429
+type RequiredOptions<Status, Key extends string> = [429] extends [Status]
   ? [opts: AppErrorOptions<Key> & { retryAfterSecs: number | null }]
   : [opts?: AppErrorOptions<Key>];
 

@@ -120,6 +120,20 @@ invisible in a diff; a `null` is a claim somebody has to read.
 `null` is folded in without a header, because a `Retry-After` that names no time is worse than
 none.
 
+Two edges worth knowing:
+
+- The obligation follows the code's whole status set. A code narrowed to a union that _could_ be
+  the 429 owes the wait too — `appError(code, msg)` where `code` is
+  `"NOT_FOUND" | "RATE_LIMIT_EXCEEDED"` does not compile without one.
+- **Only the obligation is 429-only.** Any code may state a wait, and a number renders
+  `Retry-After` at any status. A 503 that knows its own expiry should say so, and one that will
+  not clear on its own can say `retryAfterSecs: null` — which is how a client tells "not
+  configured on this deployment" from "did not answer just now", two things a status alone
+  cannot separate.
+
+`new AppError(429, …)` skips the rule, because the rule lives on the factory: only the factory
+knows your map. That is the reason to prefer `createAppError`.
+
 ## Turning a throw into an answer
 
 ```ts
