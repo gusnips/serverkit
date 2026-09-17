@@ -68,10 +68,20 @@ throw errors.notFound("Workspace");
 
 The map has to be `as const`, or every value reads as `number` and the rule below cannot see a 429. A map without it is refused, with the instruction in the compiler's message.
 
-### A 429 states its own wait
+### A 429 says how it clears
 
-`RATE_LIMIT_EXCEEDED` maps to 429, so `retryAfterSecs` is a **required argument**. Leave it out
-and the code does not compile.
+`RATE_LIMIT_EXCEEDED` maps to 429, so `retryAfterSecs` is a **required argument**: the seconds
+until the caller may retry, or `null` for a refusal that waiting cannot fix. Leave it out and
+the code does not compile.
+
+```ts
+rateLimit: (retryAfterSecs: number) =>
+  appError("RATE_LIMIT_EXCEEDED", "Too many requests", { retryAfterSecs }),
+
+concurrency: (limit: number) =>
+  // A slot frees when somebody else's job finishes. There is no wait to state.
+  appError("QUOTA_EXCEEDED", `${limit} jobs already running`, { retryAfterSecs: null }),
+```
 
 This is the rule with the best bug-per-line ratio in the whole extraction. One backend writes a
 `resetAt` ISO date that no HTTP client parses, and then keeps a hand-written list of "codes that
@@ -81,9 +91,19 @@ raises a spent daily cap with no wait at all, on a code its client reads as tran
 browser retries a limit that clears at midnight — twice, immediately, and says the same thing
 three times to a limiter that is already counting.
 
-A stated wait answers the question those lists were guessing at. `errorResponse` renders it as
-the standard `Retry-After` header **and** folds it into `details`, so an HTTP client, a proxy and
-your own SDK all learn the same wait from one value.
+Asking each refusal how it clears answers the question those lists were guessing at, and it
+answers it in the one place that knows: where the refusal is raised. A code cannot know — the
+same `QUOTA_EXCEEDED` can be a month that clears in days or a slot that clears in two seconds.
+
+Of 40 places that raise a 429 in the fleet this came from, 34 already state a wait. Of the six
+left, two genuinely cannot: a concurrency slot frees when another job finishes, and a cap on
+live objects clears by archiving one, never by waiting. `null` is for those. An omission is
+invisible in a diff; a `null` is a claim somebody has to read.
+
+`errorResponse` renders a number as the standard `Retry-After` header **and** folds it into
+`details`, so an HTTP client, a proxy and your own SDK all learn the same wait from one value. A
+`null` is folded in without a header, because a `Retry-After` that names no time is worse than
+none.
 
 ## Turning a throw into an answer
 

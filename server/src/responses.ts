@@ -198,7 +198,11 @@ export function createErrorResponse<Code extends string = string, Key extends st
       const headers: Record<string, string> = {};
       // The standard header, not just our envelope: every HTTP client, proxy and SDK already
       // knows how to wait on `Retry-After`, and none of them knows `details.retryAfterSecs`.
-      if (err.retryAfterSecs !== undefined) headers["Retry-After"] = String(err.retryAfterSecs);
+      // A number only — a refusal that waiting cannot fix says so in the body, because
+      // `Retry-After: null` is a header that states a wait and names no time.
+      if (typeof err.retryAfterSecs === "number") {
+        headers["Retry-After"] = String(err.retryAfterSecs);
+      }
       // RFC 6750 §3: a 401 names the scheme it wants. Without it a 401 is a closed door with no
       // handle — which is what an agent, with no human to ask, is left holding.
       if (err.statusCode === 401) headers["WWW-Authenticate"] = "Bearer";

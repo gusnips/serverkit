@@ -27,6 +27,10 @@ describe("a 429 states its own wait", () => {
     const err = appError("RATE_LIMIT_EXCEEDED", "Too many requests", { retryAfterSecs: 30 });
     expect(err.statusCode).toBe(429);
     expect(err.retryAfterSecs).toBe(30);
+    const durable = appError("QUOTA_EXCEEDED", "Wait for a job to finish", {
+      retryAfterSecs: null,
+    });
+    expect(durable.retryAfterSecs).toBeNull();
     expect(appError("NOT_FOUND", "Workspace not found").statusCode).toBe(404);
     expect(appError("INTERNAL_ERROR", "boom").statusCode).toBe(500);
   });
@@ -34,7 +38,8 @@ describe("a 429 states its own wait", () => {
 
 /** Never called. Every line here is an assertion about what does not compile. */
 function refusals(): void {
-  // @ts-expect-error — RATE_LIMIT_EXCEEDED maps to 429, so a wait is required.
+  // @ts-expect-error — RATE_LIMIT_EXCEEDED maps to 429, so it has to say how it clears:
+  // a number of seconds, or `null` for a refusal waiting cannot fix.
   appError("RATE_LIMIT_EXCEEDED", "Too many requests");
   // @ts-expect-error — options are there, the wait is not.
   appError("QUOTA_EXCEEDED", "Spent", spent);

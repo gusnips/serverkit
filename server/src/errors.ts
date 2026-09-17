@@ -20,12 +20,15 @@ export interface AppErrorOptions<Key extends string = string> {
   /** Interpolation values for `messageKey`. */
   params?: Record<string, string | number>;
   /**
-   * Seconds until the caller may retry. Set it HERE rather than hand-rolling it into
-   * `details`: {@link errorResponse} renders it as the standard `Retry-After` header AND
-   * folds it into `details`, so an HTTP client, a proxy and your own SDK all learn the same
-   * wait from one value.
+   * How the refusal clears: seconds until the caller may retry, or `null` for a refusal that
+   * waiting cannot fix.
+   *
+   * Set it HERE rather than hand-rolling it into `details`. `errorResponse` renders a number as
+   * the standard `Retry-After` header AND folds it into `details`, so an HTTP client, a proxy
+   * and your own SDK all learn the same wait from one value; `null` is folded in without a
+   * header, because a `Retry-After` that states no time is worse than none.
    */
-  retryAfterSecs?: number;
+  retryAfterSecs?: number | null;
   /**
    * The `message` was authored for the client — a deployment fact like "payments are not set
    * up here", a named dependency that is down — so a 5xx keeps it instead of the generic
@@ -55,7 +58,7 @@ export class AppError<Code extends string = string, Key extends string = string>
   public readonly details?: unknown;
   public readonly messageKey?: Key;
   public readonly params?: Record<string, string | number>;
-  public readonly retryAfterSecs?: number;
+  public readonly retryAfterSecs?: number | null;
   public readonly expose: boolean;
 
   constructor(statusCode: number, code: Code, message: string, opts: AppErrorOptions<Key> = {}) {
@@ -84,7 +87,9 @@ export class AppError<Code extends string = string, Key extends string = string>
   }
 
   /**
-   * `retryAfterSecs` also rides inside `details`, because that is where clients already look.
+   * `retryAfterSecs` also rides inside `details`, because that is where clients already look —
+   * an explicit `null` included, since "waiting cannot fix this" is an answer a client needs
+   * and the only alternative is the hand-written code list this replaces.
    *
    * Only an object `details` can carry it. Spreading an ARRAY — a list of validation issues —
    * turns it into `{"0": …}` and breaks every client that parses it; spreading a STRING turns
@@ -122,11 +127,19 @@ type LiteralStatuses<S> = number extends S[keyof S]
  * third raises a spent DAILY cap with no wait at all, on a code its client treats as transient,
  * so the browser retries a limit that clears at midnight — twice, immediately.
  *
- * Making the wait a required argument deletes that list from three repos and makes the retry
- * bug unrepresentable. It costs one edit per 429 call site and can never regress.
+ * Making it a required argument deletes that list from three repos and makes the retry bug
+ * unrepresentable. Measured against the fleet it came from: of 40 places that raise a 429,
+ * **34 already state a wait**, so the rule costs six edits in six repos.
+ *
+ * `null` is the other half, and the six are what proved it necessary. Two of them cannot state
+ * a wait truthfully: a concurrency slot frees when somebody else's job finishes, and a cap on
+ * live objects clears by archiving one, never by waiting at all. A required `number` would have
+ * forced both to invent a number. `null` says "waiting cannot fix this" — which is the very
+ * question the code lists were guessing at, answered by the one place that knows: the raiser.
+ * An omission is invisible in a diff; a `null` is a claim somebody has to read.
  */
 type RequiredOptions<Status, Key extends string> = Status extends 429
-  ? [opts: AppErrorOptions<Key> & { retryAfterSecs: number }]
+  ? [opts: AppErrorOptions<Key> & { retryAfterSecs: number | null }]
   : [opts?: AppErrorOptions<Key>];
 
 /**

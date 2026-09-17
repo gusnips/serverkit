@@ -108,6 +108,18 @@ describe("an AppError under 500 is answered as itself", () => {
     });
   });
 
+  it("says a refusal does NOT clear by waiting, and sends no Retry-After for it", () => {
+    // A concurrency slot frees when another job finishes, and a cap on live objects clears by
+    // archiving one. Neither is a wait a server can state, and both are 429s in the fleet.
+    const answer = errorResponse(
+      appError("RATE_LIMIT_EXCEEDED", "Three jobs already running — wait for one to finish", {
+        retryAfterSecs: null,
+      }),
+    );
+    expect(answer.headers).not.toHaveProperty("Retry-After");
+    expect(answer.body.error.details).toEqual({ retryAfterSecs: null });
+  });
+
   it("states a wait in the header as well as in details", () => {
     const answer = errorResponse(
       appError("RATE_LIMIT_EXCEEDED", "Slow down", { retryAfterSecs: 45 }),
