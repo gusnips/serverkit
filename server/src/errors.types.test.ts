@@ -8,7 +8,7 @@
  * lands on `expect(() =>` , which has no error, while the real one moves out of its reach.
  */
 import { describe, expect, it } from "vitest";
-import { createAppError } from "./errors.ts";
+import { type AppErrorOptions, createAppError } from "./errors.ts";
 
 const ERROR_STATUS = {
   NOT_FOUND: 404,
@@ -27,6 +27,7 @@ describe("a 429 states its own wait", () => {
     const err = appError("RATE_LIMIT_EXCEEDED", "Too many requests", { retryAfterSecs: 30 });
     expect(err.statusCode).toBe(429);
     expect(err.retryAfterSecs).toBe(30);
+    // The two honest answers, and only these two: a number, or a deliberate `null`.
     const durable = appError("QUOTA_EXCEEDED", "Wait for a job to finish", {
       retryAfterSecs: null,
     });
@@ -47,6 +48,19 @@ function refusals(): void {
   appError("TEAPOT", "no");
   // @ts-expect-error — "serverErrors.typo" is not a MessageKey.
   appError("NOT_FOUND", "no", { messageKey: "serverErrors.typo" });
+
+  // The three ways a forgotten argument could have passed for a deliberate `null`. The second
+  // is the one that matters: it is verbatim how three donors write their own `rateLimit`
+  // factory, so it is the shape a migration reaches for first.
+  // @ts-expect-error — an explicit `undefined` is not an answer.
+  appError("RATE_LIMIT_EXCEEDED", "x", { retryAfterSecs: undefined });
+  const forward = (message: string, opts?: AppErrorOptions<MessageKey>) =>
+    // @ts-expect-error — forwarding a caller's optional opts cannot satisfy it either.
+    appError("RATE_LIMIT_EXCEEDED", message, { ...opts });
+  void forward;
+  const partial: { retryAfterSecs?: number } = {};
+  // @ts-expect-error — nor can spreading an object whose wait is optional.
+  appError("RATE_LIMIT_EXCEEDED", "x", { ...partial });
 
   const widened: Record<string, number> = { RATE_LIMIT_EXCEEDED: 429 };
   // @ts-expect-error — without `as const` every value is `number`, so the rule above would
