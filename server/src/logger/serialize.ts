@@ -150,15 +150,32 @@ function narrowCause(cause: unknown, seen: WeakSet<object>): unknown {
  * Paired with callers passing the RAW error rather than `String(err)`, this is why a log line
  * never reads "[object Object]".
  *
- * One ordering fact worth knowing, because it decides what this replacer ever sees: `JSON.stringify`
- * calls a value's own `toJSON()` **before** the replacer. An error class that defines `toJSON()`
- * therefore serializes through that method and never reaches the branch below — stack included.
+ * One ordering fact decides what this replacer would otherwise see: `JSON.stringify` calls a
+ * value's own `toJSON()` **before** the replacer, so an error class that defines one arrives here
+ * already turned into whatever that method returns — the stack and the cause gone, and the result
+ * usually shaped for the WIRE, because that is what an error's `toJSON()` is for. Seven backends
+ * on this stack define one, and `logger.error("x", { error: appErr })` wrote
+ * `{"error":{"error":{…}}}` in every one of them: double-nested, no stack, no cause, and
+ * invisible, because the line still looks like a log line.
+ *
+ * The original is still there. `JSON.stringify` calls the replacer with the HOLDER as `this`, and
+ * the holder's own property is the untouched value — so `this[key]` recovers the Error that
+ * `toJSON()` replaced. That is why this is a `function` and not an arrow.
+ *
+ * What a log line keeps off an Error is this file's decision, not the error's: an error class is
+ * free to define the body it sends a client, and the log still gets name, message, stack, cause
+ * and the allow-list.
  *
  * A new replacer per log line, because the `seen` set must not outlive one entry.
  */
-export function errorReplacer(): (key: string, value: unknown) => unknown {
+export function errorReplacer(): (this: unknown, key: string, value: unknown) => unknown {
   const seen = new WeakSet<object>();
-  return (_key, value) => {
+  return function (key, value) {
+    const held =
+      typeof this === "object" && this !== null
+        ? (this as Record<string, unknown>)[key]
+        : undefined;
+    if (held instanceof Error) value = held;
     if (typeof value === "bigint") return value.toString();
     if (value instanceof Error) {
       if (seen.has(value)) return "[Circular]";

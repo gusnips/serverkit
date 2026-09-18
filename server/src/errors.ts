@@ -61,13 +61,17 @@ export interface AppErrorOptions<Key extends string = string> {
  * the rule lives on the factory, because only the factory knows the map. That is the reason to
  * prefer it, not a style note.
  *
- * **There is no `toJSON()`, on purpose.** `JSON.stringify` calls a value's own `toJSON()`
- * BEFORE it calls the replacer, so a class that defines one never reaches a logger's `Error`
- * branch at all. Seven backends define one here, and every one of them logs
- * `{"error":{"error":{code,message}}}` — doubly nested, with no `stack` and no `cause` — from a
- * line that still looks like a log line. A logger cannot fix that from its side, because its
- * replacer never runs. So the wire body is built by `errorResponse`, where the mask lives
- * anyway, and this stays an ordinary Error to anything that serializes it.
+ * **There is no `toJSON()`, on purpose**, and the reason is not the one first written here.
+ * `JSON.stringify` calls a value's own `toJSON()` BEFORE the replacer, so an error class that
+ * defines one hands a logger whatever that method returns instead of the error. Seven backends
+ * define one, and every one of them logs `{"error":{"error":{code,message}}}` — doubly nested,
+ * no `stack`, no `cause` — from a line that still looks like a log line.
+ *
+ * This file used to say a logger cannot fix that from its side. It can, and ours does: the
+ * replacer is called with the HOLDER as `this`, whose own property is still the untouched error
+ * (see `errorReplacer`). What remains true is the design: the wire body is built by
+ * `errorResponse`, where the mask lives anyway, so one function owns the shape a client sees —
+ * and this stays an ordinary Error to anything that serializes it.
  */
 export class AppError<Code extends string = string, Key extends string = string> extends Error {
   public readonly statusCode: number;

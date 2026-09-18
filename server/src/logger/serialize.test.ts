@@ -235,6 +235,27 @@ describe("what an Error contributes to a log line", () => {
     expect(cause.cause).toBe("[Circular]");
   });
 
+  it("keeps the stack of an error class that defines toJSON, which stringify calls first", () => {
+    // `JSON.stringify` calls a value's own `toJSON()` BEFORE the replacer, so an error class that
+    // defines one never reached the Error branch at all: the line got whatever that method
+    // returns, which is shaped for the WIRE, and lost the stack and the cause. Seven backends
+    // define one on their error class, so `logger.error("x", { error: appErr })` wrote
+    // `{"error":{"error":{…}}}` — double-nested, no stack. Invisible, because it still looks
+    // like a log line.
+    class WireError extends Error {
+      code = "NOT_FOUND";
+      toJSON() {
+        return { error: { code: this.code, message: this.message } };
+      }
+    }
+
+    const line = serialized(new WireError("Workspace not found"));
+
+    expect(line).toMatchObject({ message: "Workspace not found", code: "NOT_FOUND" });
+    expect(String(line.stack)).toContain("Workspace not found");
+    expect(line).not.toHaveProperty("error");
+  });
+
   it("shows what an AggregateError aggregated", () => {
     // `errors` is non-enumerable too, so without this line the whole log entry for a failed
     // Promise.any is the word "all failed". Each sub-error is allow-listed like any other.

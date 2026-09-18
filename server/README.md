@@ -74,12 +74,16 @@ Then throw one, anywhere:
 throw errors.notFound("Workspace");
 ```
 
-`AppError` has no `toJSON()`, and that is load-bearing rather than an omission. `JSON.stringify`
-calls a value's own `toJSON()` **before** it calls the replacer, so a class that defines one
-never reaches a logger's `Error` branch: `logger.error("failed", { error: err })` writes
-`{"error":{"error":{code,message}}}` with no stack and no cause. Seven backends define one and
-all seven log exactly that. The wire body comes from `errorResponse`, where the mask lives
-anyway, and the error stays an error.
+`AppError` has no `toJSON()`. `JSON.stringify` calls a value's own `toJSON()` **before** it calls
+the replacer, so a class that defines one hands a logger whatever that method returns instead of
+the error: `logger.error("failed", { error: err })` writes `{"error":{"error":{code,message}}}`
+with no stack and no cause. Seven backends on this stack define one and all seven log exactly
+that.
+
+`createLogger` recovers the error anyway — the replacer reads it back off the holder — so your
+own classes are safe either way. `AppError` still does not define one, because the wire body
+belongs to `errorResponse`, where the mask lives: one function owns the shape a client sees, and
+the error stays an error.
 
 The map has to be `as const`, or every value reads as `number` and the rule below cannot see a 429. A map without it is refused, with the instruction in the compiler's message.
 
