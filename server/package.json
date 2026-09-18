@@ -13,6 +13,10 @@
     ".": {
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
+    },
+    "./hono": {
+      "types": "./dist/hono/index.d.ts",
+      "default": "./dist/hono/index.js"
     }
   },
   "types": "./dist/index.d.ts",
@@ -52,7 +56,7 @@
   },
   "peerDependencies": {
     "@gusnips/http": ">=0.1 <1",
-    "hono": ">=4 <5"
+    "hono": ">=4.9.9 <5"
   },
   "peerDependenciesMeta": {
     "hono": {
