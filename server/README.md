@@ -200,6 +200,92 @@ nothing, and it is the last thing telling a client whether waiting can help.
 **An unexpected throw never reaches the client.** Log it with its `cause` and its stack; answer
 the generic 500.
 
+## Logging a failure
+
+`createLogger` writes one JSON line per event to stdout, and nothing else. Twelve backends were
+read for this and not one installs a logging library, so this ships no transports, no file
+rotation and no extra levels — every one of them runs under something that already owns stdout.
+
+```ts
+import { createLogger } from "@gusnips/server";
+
+const logger = createLogger({ level: process.env.LOG_LEVEL });
+
+logger.error("charge failed", { orderId, error: err }); // the RAW error, never String(err)
+```
+
+**Pass the error itself.** `message` and `stack` are non-enumerable, so a plain
+`JSON.stringify(err)` is `{}` — which is how a logger ends up printing nothing about the failure
+it was called to report. The serializer adds them, follows the `cause` chain and an
+`AggregateError`'s `errors`, and collapses a circular reference instead of crashing the log call.
+
+**What it keeps off an error is an allow-list**, and that is the one thing here that exists
+because of an incident rather than because of duplication. An SDK hangs its own INPUTS off the
+error it throws: a payment vendor's signature-verification error carries the unparsed webhook
+body and the signature, a Redis client puts the AUTH password in `command.args`, and a Postgres
+`DatabaseError` carries statement text with its literals in it. A loop over own properties copies
+all of that, and a webhook route is unauthenticated by definition — so anyone on the internet
+could choose what went into the log. The list admits 4 of that payment error's 25 properties, and
+it covers the `cause` chain, including a link that is not an `Error`.
+
+`level` is an argument rather than a `process.env` read, and that is the boundary the package is
+built on: a Cloudflare Worker has no `process` at all, so a module-scope read makes a package
+Node-only by accident. A Worker passes `env.LOG_LEVEL` from its handler argument. An unrecognized
+level throws at construction, because a box running at the wrong level is discovered during the
+incident it was meant to explain.
+
+## Hono
+
+`@gusnips/server/hono` is the only part that knows a framework, which is why it is a subpath:
+`hono` is an optional peer and nothing in the root entry imports it. Needs `hono >= 4.9.9` —
+before that, `routePath(c, -1)` silently ignores the `-1` and the request line names the wrong
+route.
+
+```ts
+import { errorBoundary, errorHandler, notFoundHandler, requestLogger } from "@gusnips/server/hono";
+
+app.use(requestLogger({ logger })); // first, so it times and sees everything under it
+app.use(errorBoundary); // right after
+app.onError(errorHandler({ errorResponse, logger }));
+app.notFound(notFoundHandler(errorResponse(errors.notFound("Route"))));
+```
+
+**`errorBoundary` is not optional.** Hono hands `onError` only what is `instanceof Error`.
+Anything else is rethrown past every layer and escapes as an unhandled rejection: no answer, a
+dropped connection, and a browser that reports it as a CORS failure — which sends whoever reads
+it to the wrong layer entirely. A PostgREST client rejects with plain objects, so this is not
+hypothetical. The boundary wraps one in an `Error` and keeps the original as `cause`.
+
+**The request line names the route TEMPLATE, never the path.** A path is what puts a customer's
+document number in a log and in whatever reads that log afterwards. `/health` is skipped with
+everything under it, because every deploy polls it in a loop; a throw is logged anyway.
+
+The request id goes back on `X-Request-ID`, on every answer including `onError`'s and
+`notFound`'s. A caller's own id is echoed only if it is 64 characters of `A-Z a-z 0-9 . _ -`,
+so the id in a line is always either the caller's or ours. Cross-origin, list that header in your
+CORS `exposeHeaders` or the browser hides it from the page.
+
+### The guard check
+
+```ts
+import { assertEveryRouteGuarded, guard, underAny } from "@gusnips/server/hono";
+
+export const requireUser = guard(async (c, next) => { … });   // mark it where it is defined
+
+// in a test
+assertEveryRouteGuarded(buildApp(), { isPublic: underAny(PUBLIC_PREFIXES) });
+```
+
+It walks every registered route through Hono's **own matcher** and fails naming each endpoint no
+guard runs in front of. The matcher is the point: a `use` registered AFTER its `route` never runs
+— the handler answers and the guard silently does not fire. A route whose guard did not fire is
+indistinguishable from one with no guard, and comparing pattern lists cannot tell you which you
+have.
+
+Pass the app's own public rule, never a second list kept for the test — an exemption list nothing
+else reads is the next thing to drift. It also fails a guard that runs in front of nothing, and
+an app with no endpoints, so the check cannot pass by asking nothing.
+
 ## What this package does not ship
 
 Each of these was measured, not assumed.
@@ -212,8 +298,12 @@ Each of these was measured, not assumed.
   them would add a call and subtract nothing.
 - **A `messageKey` catalog.** The server owns the condition and the `params`; the client owns the
   prose.
-- **A styled error page, a logger transport, or an alerting client.** `errorResponse` returns
-  `kind` so you can route those yourself.
+- **A logging library, a transport, or an alerting client.** The measured gap between 60 lines
+  of `console.log(JSON.stringify(...))` and a real logging library is the error serializer, and
+  the standard one ships the same copy-loop this package exists to remove — so `createLogger` is
+  those 60 lines with the serializer fixed, and nothing else. `errorResponse` returns `kind` and
+  `errorHandler` takes `onUnexpected`, so alerting is yours to route.
+- **A styled error page.**
 
 ## Rules it will not let you break
 
