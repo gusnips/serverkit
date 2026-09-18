@@ -92,6 +92,9 @@ function keptValue(key: string, value: unknown): unknown {
  *   non-enumerable, so both are invisible to the loop above; without this line "all attempts
  *   failed" is the whole log entry. Each one goes back through this replacer, so the allow-list
  *   covers the chain, not just the top.
+ * - A `cause` that is not an Error gets the same list. A data layer that rejects with a plain
+ *   object hangs the same things off it an SDK hangs off an Error, and wrapping one keeps it as
+ *   the cause: `new Error(message, { cause: whatWasThrown })` is what an error boundary makes.
  * - bigints stringify instead of throwing.
  * - Circular references collapse to "[Circular]" instead of crashing the log call.
  *
@@ -106,17 +109,30 @@ function keptValue(key: string, value: unknown): unknown {
  */
 export function errorReplacer(): (key: string, value: unknown) => unknown {
   const seen = new WeakSet<object>();
+  const kept = (from: object, out: Record<string, unknown>) => {
+    for (const [k, v] of Object.entries(from)) {
+      if (KEPT_ERROR_FIELDS.has(k)) out[k] = keptValue(k, v);
+    }
+    const cause: unknown = "cause" in from ? from.cause : undefined;
+    if (cause !== undefined) out.cause = causeOf(cause);
+    return out;
+  };
+  // An Error cause comes back through the replacer below; any other object is filtered here.
+  const causeOf = (cause: unknown): unknown => {
+    if (typeof cause !== "object" || cause === null || cause instanceof Error) return cause;
+    if (seen.has(cause)) return "[Circular]";
+    seen.add(cause);
+    const out: Record<string, unknown> = {};
+    if ("name" in cause && typeof cause.name === "string") out.name = cause.name;
+    if ("message" in cause && typeof cause.message === "string") out.message = cause.message;
+    return kept(cause, out);
+  };
   return (_key, value) => {
     if (typeof value === "bigint") return value.toString();
     if (value instanceof Error) {
       if (seen.has(value)) return "[Circular]";
       seen.add(value);
-      const out: Record<string, unknown> = { name: value.name, message: value.message };
-      for (const [k, v] of Object.entries(value)) {
-        if (KEPT_ERROR_FIELDS.has(k)) out[k] = keptValue(k, v);
-      }
-      const { cause } = value;
-      if (cause !== undefined) out.cause = cause;
+      const out = kept(value, { name: value.name, message: value.message });
       if (value instanceof AggregateError) out.errors = value.errors;
       if (value.stack) out.stack = value.stack;
       return out;

@@ -202,6 +202,37 @@ describe("what an Error contributes to a log line", () => {
     expect(JSON.stringify(line)).not.toContain("hunter2");
   });
 
+  it("allow-lists a cause that is not an Error, all the way down", () => {
+    // A data layer that rejects with a plain object hangs the same things off it that an SDK hangs
+    // off an Error, and wrapping it keeps it as the cause. Passed through whole, it skipped the
+    // list above one level down, failing-row rule included.
+    const rejection: Record<string, unknown> = {
+      code: "23514",
+      message: 'new row for relation "cards" violates check constraint "cards_number_check"',
+      details: "Failing row contains (someone@example.com, 4242424242424242).",
+      hint: null,
+      query: "insert into cards values ('someone@example.com', '4242424242424242')",
+      cause: { code: "AUTH", command: { args: ["default", "hunter2"] } },
+    };
+    const looped: Record<string, unknown> = { code: "E_LOOP" };
+    looped.cause = looped;
+
+    const line = serialized(new Error("could not save the card", { cause: rejection }));
+
+    expect(line.cause).toEqual({
+      message: rejection.message,
+      code: "23514",
+      details: "[row omitted: Postgres DETAIL for this error is the whole failing row]",
+      hint: null,
+      cause: { code: "AUTH" },
+    });
+    expect(JSON.stringify(line)).not.toMatch(/4242|someone@|insert into|hunter2/);
+    expect(serialized(new Error("wrapped", { cause: looped })).cause).toEqual({
+      code: "E_LOOP",
+      cause: "[Circular]",
+    });
+  });
+
   it("shows what an AggregateError aggregated", () => {
     // `errors` is non-enumerable too, so without this line the whole log entry for a failed
     // Promise.any is the word "all failed". Each sub-error is allow-listed like any other.

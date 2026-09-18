@@ -67,6 +67,26 @@ describe("errorBoundary", () => {
     expect(failed?.error).toMatchObject({ message: "no rows returned", cause: rejection });
   });
 
+  it("logs what was thrown through the same allow-list as an Error, failing row and all", async () => {
+    // What a PostgREST client rejects with for a CHECK violation. Its `details` is the whole
+    // failing row, which the allow-list replaces on an Error and let through on a plain cause.
+    const { app, lines } = setup();
+    app.post("/cards", () => {
+      throw {
+        code: "23514",
+        message: 'new row for relation "cards" violates check constraint "cards_number_check"',
+        details: "Failing row contains (someone@example.com, 4242424242424242).",
+        hint: null,
+      };
+    });
+
+    await app.request("/cards", { method: "POST" });
+
+    const failed = lines.find((line) => line.message === "request failed");
+    expect(failed?.error).toMatchObject({ cause: { code: "23514" } });
+    expect(JSON.stringify(lines)).not.toMatch(/4242|someone@/);
+  });
+
   it("hands a real Error through as the same instance", async () => {
     const thrown = new TypeError("x is undefined");
     const { app, onUnexpected } = setup();
