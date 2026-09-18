@@ -5,9 +5,9 @@
  * Adapted from the frontend kit's check, which exists because two broken releases shipped there
  * with every source file correct: one published the literal range `workspace:*`, and one pinned a
  * sibling to the version a stale lockfile remembered. Neither is visible without unpacking a
- * tarball. This repo has one package today, so the sibling checks have nothing to catch yet. They
- * run anyway, so a second package cannot arrive without them, plus the ones a package with bins
- * needs:
+ * tarball. Neither package here depends on the other today, so the sibling checks have nothing to
+ * catch yet. They run anyway, so a dependency between them cannot arrive without them, plus the
+ * ones a package with bins needs:
  *
  * - every `dist` file has a `src` file behind it (tsc never deletes output from a rename);
  * - no dependency range is `workspace:`, and a sibling is pinned to its current version;
@@ -15,8 +15,9 @@
  * - every bin name starts with `gusnips-`. A bare name like `migrate` belongs to someone else on
  *   npm, so `bunx migrate` in a job without this package installed downloads and runs a stranger's
  *   code with that job's DATABASE_URL, and two generic names collide in an adopter's `.bin`;
- * - the unpacked tarball imports and runs under plain `node`, with only its peer installed. That is
- *   the one check that proves no Bun-only global reached the published code.
+ * - every entry of the unpacked tarball imports, and every bin runs, under plain `node` with only
+ *   its peers installed. That is the one check that proves no Bun-only global reached the
+ *   published code.
  *
  * Run: bun run release:check
  */
@@ -28,7 +29,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const ROOT = join(fileURLToPath(import.meta.url), "..", "..");
-const PACKAGES = ["migrate"];
+const PACKAGES = ["migrate", "server"];
 
 /** The commands a bin dispatches to. Each one is run with `--help` from the unpacked tarball. */
 const COMMANDS: Record<string, string[]> = {
@@ -139,10 +140,21 @@ try {
       await mkdir(dirname(to), { recursive: true });
       if (existsSync(from)) await symlink(from, to);
     }
-    try {
-      run("node", ["--input-type=module", "-e", `await import(${JSON.stringify(name)});`], install);
-    } catch (err) {
-      problems.push(`${name} does not import under node: ${String(err)}`);
+    // Every code entry, not just the root: a subpath is where an optional peer lives, and an import
+    // of "." never loads it. A data entry, like an .sql file, is read by its caller, not imported.
+    for (const [subpath, target] of Object.entries(packed.exports ?? { ".": "" })) {
+      const file = typeof target === "string" ? target : target.default;
+      if (file && !file.endsWith(".js")) continue;
+      const specifier = name + subpath.slice(1);
+      try {
+        run(
+          "node",
+          ["--input-type=module", "-e", `await import(${JSON.stringify(specifier)});`],
+          install,
+        );
+      } catch (err) {
+        problems.push(`${specifier} does not import under node: ${String(err)}`);
+      }
     }
     for (const [bin, path] of Object.entries(packed.bin ?? {})) {
       for (const command of [[], ...(COMMANDS[bin] ?? []).map((each) => [each])]) {
