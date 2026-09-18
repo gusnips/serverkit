@@ -6,11 +6,12 @@
  *     app.onError(errorHandler({ errorResponse, logger }));
  *     app.notFound(notFoundHandler(errorResponse(errors.notFound("Route"))));
  *
- * and, in a test, `assertEveryRouteGuarded(app, { publicPrefixes: ["/health", "/webhooks"] })`.
+ * and, in a test of the real app, `assertEveryRouteGuarded(app, { isPublic })`, with the rule the
+ * app itself uses for what anyone may call.
  */
 export { errorBoundary, errorHandler, notFoundHandler } from "./errors.ts";
 export type { ErrorHandlerOptions } from "./errors.ts";
-export { assertEveryRouteGuarded, guard } from "./guards.ts";
+export { assertEveryRouteGuarded, guard, underAny } from "./guards.ts";
 export type { GuardCheckOptions } from "./guards.ts";
 export { requestLogger } from "./request-logger.ts";
 export type { RequestLoggerOptions, RequestVariables } from "./request-logger.ts";

@@ -1,6 +1,6 @@
 import { Hono, type MiddlewareHandler } from "hono";
 import { describe, expect, it } from "vitest";
-import { assertEveryRouteGuarded, guard } from "./guards.ts";
+import { assertEveryRouteGuarded, guard, underAny } from "./guards.ts";
 
 const requireAdmin = guard(async (c, next) => {
   if (c.req.header("Authorization") !== "Bearer admin") return c.json({}, 401);
@@ -13,8 +13,8 @@ const logRequest: MiddlewareHandler = async (_c, next) => {
 
 const ok = (c: { text: (body: string) => Response }) => c.text("ok");
 
-function check(app: Hono, publicPrefixes: string[] = []) {
-  return () => assertEveryRouteGuarded(app, { publicPrefixes });
+function check(app: Hono, isPublic: (path: string) => boolean = () => false) {
+  return () => assertEveryRouteGuarded(app, { isPublic });
 }
 
 describe("assertEveryRouteGuarded", () => {
@@ -39,6 +39,64 @@ describe("assertEveryRouteGuarded", () => {
     expect(check(app)).toThrow(/endpoint\(s\) answer with no guard[^]*\n {2}GET \/admin\/users\n/);
   });
 
+  it("fails a router mounted above the guard loop", async () => {
+    // One backend's gate test built a second app from its guard list plus a catch-all, so it never
+    // saw the real mount order, and passed while the real app's router, mounted above the loop,
+    // answered with no token at all. Only the real app, asked, has the order.
+    const patterns = ["/feedback", "/admin/*"];
+    const feedback = new Hono();
+    feedback.get("/", ok);
+    feedback.post("/", ok);
+    feedback.get("/mine", ok);
+    const app = new Hono();
+    app.route("/feedback", feedback);
+    for (const pattern of patterns) app.use(pattern, requireAdmin);
+    app.get("/admin/users", ok);
+
+    expect((await app.request("/feedback/mine")).status).toBe(200);
+    expect(check(app)).toThrow(
+      /3 endpoint\(s\)[^]*\n {2}GET \/feedback\n {2}GET \/feedback\/mine\n {2}POST \/feedback\n/,
+    );
+  });
+
+  it("fails the route under an exact guard pattern, which only ever covered itself", () => {
+    // Hono reads `use("/feedback")` as that one path. The sub-route under it is what shipped public.
+    const feedback = new Hono();
+    feedback.get("/", ok);
+    feedback.get("/mine", ok);
+    const app = new Hono();
+    app.use("/feedback", requireAdmin);
+    app.route("/feedback", feedback);
+
+    expect(check(app)).toThrow(/1 endpoint\(s\)[^]*\n {2}GET \/feedback\/mine\n/);
+  });
+
+  it("fails a guard that runs in front of no endpoint, which is what a router that mounted nothing leaves", () => {
+    // A stand-in dependency's router registers nothing, so its routes drop out of the check, and
+    // the check passes by having nothing to ask. The guard mounted over it is the trace left.
+    const app = new Hono();
+    app.use("/admin/*", requireAdmin);
+    app.route("/admin", new Hono());
+    app.get("/health", ok);
+
+    expect(check(app, (path) => path === "/health")).toThrow(
+      /1 guard\(s\) run in front of no endpoint:\n {2}ALL \/admin\/\*\n/,
+    );
+  });
+
+  it("counts a guard in front of a route the app calls public, which the guard itself lets by", () => {
+    // A guard that waves one public read through is still a guard with a route behind it.
+    const app = new Hono();
+    app.use("/sources/*", requireAdmin);
+    app.get("/sources/catalog", ok);
+
+    expect(check(app, (path) => path === "/sources/catalog")).not.toThrow();
+  });
+
+  it("fails an app with no endpoints at all, rather than passing it", () => {
+    expect(check(new Hono())).toThrow(/no endpoints/);
+  });
+
   it("fails a route with nothing in front of it but middleware that is not a guard", () => {
     const app = new Hono();
     app.use(logRequest);
@@ -59,14 +117,19 @@ describe("assertEveryRouteGuarded", () => {
     expect(check(app)).toThrow(/2 endpoint\(s\)[^]*\n {2}GET \/a\n {2}POST \/b\n/);
   });
 
-  it("exempts a public prefix and everything under it, and nothing that only starts with it", () => {
+  it("skips what the app's own rule calls public, asked with the path a request would carry", () => {
     const app = new Hono();
-    app.post("/webhooks", ok);
     app.post("/webhooks/pay", ok);
-    app.post("/webhooksx", ok);
+    app.get("/docs/:page", ok);
+    app.get("/reports/:id{[0-9]+}", ok);
+    const asked: string[] = [];
+    const isPublic = (path: string) => {
+      asked.push(path);
+      return path.startsWith("/webhooks/") || path.startsWith("/docs/");
+    };
 
-    expect(check(app, ["/webhooks"])).toThrow(/\n {2}POST \/webhooksx\n/);
-    expect(check(app, ["/webhooks"])).not.toThrow(/POST \/webhooks\n/);
+    expect(check(app, isPublic)).toThrow(/1 endpoint\(s\)[^]*\n {2}GET \/reports\/:id/);
+    expect(asked).toEqual(["/webhooks/pay", "/docs/probe", "/reports/1"]);
   });
 
   it("counts a guard passed inline, ahead of the handler", () => {
@@ -121,13 +184,21 @@ describe("assertEveryRouteGuarded", () => {
     expect(check(app)).toThrow(/\n {2}GET \/admin\/users\n/);
   });
 
+  it("probes a numeric parameter pattern with a number", () => {
+    const app = new Hono();
+    app.use("/forecasts/*", requireAdmin);
+    app.get("/forecasts/:id{[0-9]+}/watch", ok);
+
+    expect(check(app)).not.toThrow();
+  });
+
   it("reports a path it cannot build a request for, rather than passing it", () => {
     const app = new Hono();
-    app.use("/files/*", requireAdmin);
-    app.get("/files/:id{[0-9]+}", ok);
+    app.use("/tags/*", requireAdmin);
+    app.get("/tags/:name{[a-z]+}", ok);
 
     expect(check(app)).toThrow(
-      /GET \/files\/:id\{\[0-9\]\+\} \(could not be probed at \/files\/probe\)/,
+      /GET \/tags\/:name\{\[a-z\]\+\} \(could not be probed at \/tags\/1\)/,
     );
   });
 
@@ -136,8 +207,19 @@ describe("assertEveryRouteGuarded", () => {
     app.get("/static/*", ok);
     app.get("*", ok);
 
-    expect(check(app, ["/static"])).toThrow(/\n {2}GET \/\*\n/);
-    expect(check(app, ["/static"])).not.toThrow(/static/);
+    expect(check(app, underAny(["/static"]))).toThrow(/\n {2}GET \/\*\n/);
+    expect(check(app, underAny(["/static"]))).not.toThrow(/static/);
+  });
+});
+
+describe("underAny", () => {
+  it("reads every entry as a prefix, whichever pattern form it is written in", () => {
+    const under = underAny(["/feedback", "/admin/*"]);
+
+    for (const path of ["/feedback", "/feedback/mine", "/admin", "/admin/users/1"])
+      expect(under(path), path).toBe(true);
+    for (const path of ["/feedbacks", "/adminx", "/", "/other/feedback"])
+      expect(under(path), path).toBe(false);
   });
 });
 
