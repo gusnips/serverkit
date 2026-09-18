@@ -49,7 +49,13 @@ export interface TestDatabase {
 
 export async function freshDatabase(): Promise<TestDatabase> {
   const name = `migrate_test_${Math.random().toString(36).slice(2, 10)}`;
-  await withAdmin((client) => client.query(`CREATE DATABASE ${name}`));
+  await withAdmin(async (client) => {
+    await client.query(`CREATE DATABASE ${name}`);
+    // Tests assert on Postgres's own error text, which a cluster initialised under a non-English
+    // locale translates ("coluna … não existe"). Pinned per database rather than per session so
+    // the runner's RESET ALL falls back to it instead of clearing it.
+    await client.query(`ALTER DATABASE ${name} SET lc_messages = 'C'`);
+  });
   const url = urlFor(name);
   return {
     url,
