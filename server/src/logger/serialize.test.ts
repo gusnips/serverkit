@@ -202,6 +202,39 @@ describe("what an Error contributes to a log line", () => {
     expect(JSON.stringify(line)).not.toContain("hunter2");
   });
 
+  it("narrows a cause that is not an Error, which is the shape this package itself creates", () => {
+    // `errorBoundary` wraps every non-Error throw as `new Error(toMessage(err), { cause: err })`,
+    // so in a Hono app the cause slot is exactly where an SDK's own rejection object lands — and a
+    // PostgREST client rejecting with a plain object is why that wrapper exists. Until this, the
+    // allow-list stopped at the Error: the wrapper was filtered, the object one level under it was
+    // copied whole, and the line reads as though the list had run.
+    const rejection = {
+      message: "invalid signature",
+      code: "PGRST301",
+      payload: '{"card":"4242424242424242"}',
+      header: "t=1,v1=deadbeef",
+    };
+
+    const line = serialized(new Error("invalid signature", { cause: rejection }));
+
+    expect(line.cause).toEqual({ message: "invalid signature", code: "PGRST301" });
+    expect(JSON.stringify(line)).not.toContain("4242");
+  });
+
+  it("survives a chain of plain-object causes that holds itself", () => {
+    // The Error branch has had this guard since it was written; the narrowing builds a new object
+    // and so needs its own, or a self-referencing rejection recurses until the stack ends — inside
+    // the log call, which is the one place that must never take the process down.
+    const inner: Record<string, unknown> = { code: "E_LOOP" };
+    inner.cause = inner;
+
+    const line = serialized(new Error("looped", { cause: inner }));
+    const cause = line.cause as Record<string, unknown>;
+
+    expect(cause.code).toBe("E_LOOP");
+    expect(cause.cause).toBe("[Circular]");
+  });
+
   it("shows what an AggregateError aggregated", () => {
     // `errors` is non-enumerable too, so without this line the whole log entry for a failed
     // Promise.any is the word "all failed". Each sub-error is allow-listed like any other.

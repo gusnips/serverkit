@@ -82,6 +82,57 @@ function keptValue(key: string, value: unknown): unknown {
 }
 
 /**
+ * A thrown value that is NOT an Error, narrowed to what a log line may print off it.
+ *
+ * The allow-list above is written against Errors, and until this the narrowing stopped there: an
+ * Error was filtered and whatever sat in its `cause` was copied whole. That gap is not theoretical
+ * here, it is this package's own doing — `errorBoundary` turns every non-Error throw into
+ * `new Error(toMessage(err), { cause: err })`, because Hono's `onError` never sees a non-Error and
+ * a PostgREST client rejects with plain objects. So in a Hono app the cause slot is precisely where
+ * a vendor's rejection object ends up, and a leak there reads as if the list had run.
+ *
+ * `cause` means "the error this one came from", so whatever sits in it is in the error slot and
+ * gets the same treatment. `name` and `message` come along because a rejection object usually
+ * carries them and a line with neither says nothing at all.
+ *
+ * Deliberate state it does NOT keep: context an app attaches on purpose. That belongs in the
+ * logger's `meta`, which is untouched — `cause` is not the place for it, and one incident of a
+ * vendor's request body in the log outweighs a field nobody put there deliberately.
+ */
+export function narrowErrorLike(value: object): Record<string, unknown> {
+  return narrow(value, new WeakSet<object>());
+}
+
+function narrow(value: object, seen: WeakSet<object>): Record<string, unknown> {
+  seen.add(value);
+  const out: Record<string, unknown> = {};
+  const { name, message, cause } = value as {
+    name?: unknown;
+    message?: unknown;
+    cause?: unknown;
+  };
+  if (typeof name === "string") out.name = name;
+  if (typeof message === "string") out.message = message;
+  for (const [k, v] of Object.entries(value)) {
+    if (KEPT_ERROR_FIELDS.has(k)) out[k] = keptValue(k, v);
+  }
+  if (cause !== undefined) out.cause = narrowCause(cause, seen);
+  return out;
+}
+
+/**
+ * An Error cause goes back unchanged, because `JSON.stringify` walks it into the replacer's own
+ * Error branch. Anything that is not an object is a string or a number, which is its own value.
+ */
+function narrowCause(cause: unknown, seen: WeakSet<object>): unknown {
+  if (cause instanceof Error || typeof cause !== "object" || cause === null) return cause;
+  // The recursion builds new objects, so the replacer's `seen` cannot see this chain: a rejection
+  // that holds itself would recurse until the stack ends, inside the one call that must never take
+  // the process down.
+  return seen.has(cause) ? "[Circular]" : narrow(cause, seen);
+}
+
+/**
  * A `JSON.stringify` replacer that keeps log lines useful and crash-proof:
  *
  * - Errors serialize to a readable object. `message` and `stack` are non-enumerable, so a plain
@@ -91,7 +142,8 @@ function keptValue(key: string, value: unknown): unknown {
  * - A nested `cause` is followed, and so is an `AggregateError`'s `errors`. Both are
  *   non-enumerable, so both are invisible to the loop above; without this line "all attempts
  *   failed" is the whole log entry. Each one goes back through this replacer, so the allow-list
- *   covers the chain, not just the top.
+ *   covers the chain, not just the top — and a cause that is not an Error is narrowed here
+ *   instead, by {@link narrowErrorLike}, because the replacer's Error branch would never see it.
  * - bigints stringify instead of throwing.
  * - Circular references collapse to "[Circular]" instead of crashing the log call.
  *
@@ -116,7 +168,7 @@ export function errorReplacer(): (key: string, value: unknown) => unknown {
         if (KEPT_ERROR_FIELDS.has(k)) out[k] = keptValue(k, v);
       }
       const { cause } = value;
-      if (cause !== undefined) out.cause = cause;
+      if (cause !== undefined) out.cause = narrowCause(cause, seen);
       if (value instanceof AggregateError) out.errors = value.errors;
       if (value.stack) out.stack = value.stack;
       return out;
