@@ -10,6 +10,8 @@
  * the note on {@link AppError}.
  */
 
+import { narrowErrorLike } from "./logger/serialize.ts";
+
 export interface AppErrorOptions<Key extends string = string> {
   /** What makes the refusal ACTIONABLE: the plan that lifts a 402, the scope of a quota. */
   details?: unknown;
@@ -240,7 +242,19 @@ export function toMessage(err: unknown): string {
   if (typeof err === "object" && err !== null) {
     const { message } = err as { message?: unknown };
     if (typeof message === "string") return message;
-    return safeStringify(err);
+    // With no message to read, the object itself has to say what failed — and it cannot be
+    // printed whole. This string becomes an Error's `message` in `errorBoundary`, and a message
+    // is printed, so an SDK that rejects with the request it sent would put that request in the
+    // log through here. Same allow-list as the log serializer, one step earlier.
+    const kept = narrowErrorLike(err);
+    if (Object.keys(kept).length > 0) return safeStringify(kept);
+    // Nothing printable left. `{}` would be the "[object Object]" failure again in a new
+    // spelling: a useless string standing where the real failure was. The key names come from
+    // whoever threw, never from a caller, so they are the part that still identifies it.
+    const keys = Object.keys(err);
+    return keys.length > 0
+      ? `An object was thrown with no message. Its keys: ${keys.join(", ")}.`
+      : "An object was thrown with no message and no fields.";
   }
   return String(err);
 }

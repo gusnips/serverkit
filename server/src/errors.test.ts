@@ -23,6 +23,25 @@ describe("toMessage", () => {
     expect(out).toContain("run the migration");
   });
 
+  it("keeps a messageless object's diagnostic and drops the inputs hung beside it", () => {
+    // The same allow-list the log serializer runs, and for the same reason one step later: this
+    // string becomes an Error's message in `errorBoundary`, and a message is printed. An SDK that
+    // rejects with the request it sent would otherwise put that request into the log through here.
+    const out = toMessage({ code: "PGRST301", payload: '{"card":"4242424242424242"}' });
+
+    expect(out).toContain("PGRST301");
+    expect(out).not.toContain("4242");
+  });
+
+  it("names the keys of an object with nothing printable, rather than printing nothing", () => {
+    // `{}` would be the "[object Object]" failure again in a new spelling: a useless string where
+    // the real failure was. The key names come from the SDK, never from a caller, so they are the
+    // one part of an unprintable object that identifies it.
+    expect(toMessage({ payload: "the whole request body", header: "t=1,v1=deadbeef" })).toBe(
+      "An object was thrown with no message. Its keys: payload, header.",
+    );
+  });
+
   it("survives a circular object", () => {
     const cycle: Record<string, unknown> = { code: "E_CYCLE" };
     cycle.self = cycle;
