@@ -13,7 +13,20 @@
 import type { ApiError, ApiSuccess, PaginationMeta } from "@gusnips/http";
 import { AppError } from "./errors.ts";
 
-/** Every 2xx body is `{ data }`, or `{ data, meta }` where a route has counts to report. */
+/**
+ * The `body` is `{ data }`, or `{ data, meta }` where a route has counts to report.
+ *
+ * What comes back is an ANSWER — `{ status, body }` — not a body, because this layer is
+ * framework-free and has to hand its caller a status too. An adapter takes `.body`:
+ *
+ *     return c.json(ok(data), status);        // WRONG: {"status":200,"body":{"data":…}}
+ *     return c.json(ok(data).body, status);   // the envelope
+ *
+ * Nothing catches the first line — `c.json` takes any JSON value, the status is still whatever
+ * you passed, and a test that calls this module never sees the body its caller sends. It shipped,
+ * and a client found it. On Hono, import `ok` from `@gusnips/server/hono` instead: the four
+ * adapters there take the `Context`, and the question does not arise.
+ */
 export function ok<T, M = PaginationMeta>(data: T, meta?: M) {
   const body: ApiSuccess<T, M> = meta === undefined ? { data } : { data, meta };
   return { status: 200 as const, body };
