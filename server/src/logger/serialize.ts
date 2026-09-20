@@ -91,8 +91,10 @@ function keptValue(key: string, value: unknown): unknown {
  * a PostgREST client rejects with plain objects. So in a Hono app the cause slot is precisely where
  * a vendor's rejection object ends up, and a leak there reads as if the list had run.
  *
- * `cause` means "the error this one came from", so whatever sits in it is in the error slot and
- * gets the same treatment. `name` and `message` come along because a rejection object usually
+ * A plain object passed directly as `meta.error` is the other door. Hono wraps it, but a worker,
+ * a fire-and-forget catch or a database client outside Hono does not. `error` is the raw-error slot
+ * the logger documents, so it gets the same treatment as `cause`; an ordinary metadata object under
+ * any other key stays untouched. `name` and `message` come along because a rejection object usually
  * carries them and a line with neither says nothing at all.
  *
  * Deliberate state it does NOT keep: context an app attaches on purpose. That belongs in the
@@ -139,6 +141,9 @@ function narrowCause(cause: unknown, seen: WeakSet<object>): unknown {
  *   `JSON.stringify(err)` is `{}` — which is how a logger ends up printing nothing about the
  *   failure it was called to report. They are added explicitly, and the allow-listed extras ride
  *   along beside them.
+ * - A plain object in the root `error` slot is narrowed through the same allow-list. Hono's
+ *   boundary turns one into an Error cause, but workers and swallowed catches log it directly.
+ *   Other metadata objects stay untouched.
  * - A nested `cause` is followed, and so is an `AggregateError`'s `errors`. Both are
  *   non-enumerable, so both are invisible to the loop above; without this line "all attempts
  *   failed" is the whole log entry. Each one goes back through this replacer, so the allow-list
@@ -170,12 +175,17 @@ function narrowCause(cause: unknown, seen: WeakSet<object>): unknown {
  */
 export function errorReplacer(): (this: unknown, key: string, value: unknown) => unknown {
   const seen = new WeakSet<object>();
+  let root: object | undefined;
   return function (key, value) {
     const held =
       typeof this === "object" && this !== null
         ? (this as Record<string, unknown>)[key]
         : undefined;
+    if (key === "" && typeof held === "object" && held !== null) root = held;
     if (held instanceof Error) value = held;
+    else if (this === root && key === "error" && typeof held === "object" && held !== null) {
+      return seen.has(held) ? "[Circular]" : narrow(held, seen);
+    }
     if (typeof value === "bigint") return value.toString();
     if (value instanceof Error) {
       if (seen.has(value)) return "[Circular]";

@@ -221,6 +221,28 @@ describe("what an Error contributes to a log line", () => {
     expect(JSON.stringify(line)).not.toContain("4242");
   });
 
+  it("allow-lists a thrown plain object passed directly as the error", () => {
+    // Hono wraps a non-Error throw as a cause, but workers, fire-and-forget catches and a database
+    // client's `{ code, message, details }` rejection reach the logger directly. `error` is the
+    // raw-error slot the logger documents; an ordinary metadata object under another key stays
+    // ordinary metadata.
+    const rejection = {
+      message: "insert failed",
+      code: "23514",
+      detail: "Failing row contains (someone@example.com, 4242424242424242).",
+      payload: '{"customer_email":"someone@example.com"}',
+    };
+
+    const line = serialized(rejection);
+
+    expect(line).toEqual({
+      message: "insert failed",
+      code: "23514",
+      detail: "[row omitted: Postgres DETAIL for this error is the whole failing row]",
+    });
+    expect(entryFor({ context: rejection }).context).toEqual(rejection);
+  });
+
   it("survives a chain of plain-object causes that holds itself", () => {
     // The Error branch has had this guard since it was written; the narrowing builds a new object
     // and so needs its own, or a self-referencing rejection recurses until the stack ends — inside
