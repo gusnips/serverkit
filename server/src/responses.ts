@@ -153,10 +153,21 @@ function envelope<Code extends string, Key extends string>(
 }
 
 interface RawIssue {
-  path?: unknown;
-  code?: unknown;
-  maximum?: unknown;
-  minimum?: unknown;
+  readonly path: readonly PropertyKey[];
+  readonly code: string;
+  readonly maximum?: unknown;
+  readonly minimum?: unknown;
+}
+
+/** One rejected field: enough to fix the call, and nothing about the schema. */
+export interface ValidationIssue {
+  /** The field that failed, as the caller spelled it. */
+  path: (string | number)[];
+  /** The rule that rejected it, such as `too_big`. */
+  code: string;
+  /** The numeric bound, when the rule has one. */
+  maximum?: number;
+  minimum?: number;
 }
 
 /**
@@ -188,13 +199,20 @@ function zodIssues(err: unknown): RawIssue[] | null {
  * The bound is the exception, and it belongs to the caller: it is the published contract, and
  * a `too_big` without it costs somebody a bisect to rediscover a number our own docs state.
  */
-function safeIssues(issues: RawIssue[]): unknown[] {
-  return issues.map((issue) => ({
-    path: issue.path,
-    code: issue.code,
-    ...(typeof issue.maximum === "number" && { maximum: issue.maximum }),
-    ...(typeof issue.minimum === "number" && { minimum: issue.minimum }),
-  }));
+export function validationIssues(error: {
+  readonly issues: readonly RawIssue[];
+}): ValidationIssue[] {
+  return error.issues.map((issue): ValidationIssue => {
+    const { maximum, minimum } = issue;
+    return {
+      path: issue.path.map((segment) =>
+        typeof segment === "symbol" ? (segment.description ?? "") : segment,
+      ),
+      code: issue.code,
+      ...(typeof maximum === "number" && { maximum }),
+      ...(typeof minimum === "number" && { minimum }),
+    };
+  });
 }
 
 /**
@@ -233,7 +251,7 @@ export function createErrorResponse<Code extends string = string, Key extends st
     if (issues !== null) {
       return {
         status: 400,
-        body: envelope(opts.validation, safeIssues(issues)),
+        body: envelope(opts.validation, validationIssues({ issues })),
         headers: {},
         kind: "client",
       };

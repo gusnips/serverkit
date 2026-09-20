@@ -181,7 +181,9 @@ contract, and a "too big" without it costs somebody a bisect to rediscover a num
 already state.
 
 Validation is recognized by shape, not by an import, so your validator does not become this
-package's dependency. Measured against zod 3.25, 4.4 and 4.5.
+package's dependency. Measured against zod 3.25, 4.4 and 4.5. A tool or queue consumer can use
+`validationIssues(error)` from the root package to apply the same allow-list without building an
+HTTP answer.
 
 **A 5xx keeps its message unless its code is masked.** By default only `INTERNAL_ERROR` is,
 because that is the code you raise when something unexpected broke, so its message may carry

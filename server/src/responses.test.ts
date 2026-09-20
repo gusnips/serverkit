@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
+import { type ValidationIssue, validationIssues } from "./index.ts";
 import { AppError, createAppError } from "./errors.ts";
 import { created, createErrorResponse, noContent, ok, paginated } from "./responses.ts";
 
@@ -109,6 +110,32 @@ describe("a validation failure is a 400 that reflects nothing back", () => {
   const schema = z
     .object({ days: z.enum(["7", "30"]), timeoutMs: z.number().max(30_000) })
     .strict();
+
+  it("exports the safe issue projection for every door that validates input", () => {
+    const validationError = {
+      issues: [
+        {
+          path: ["items", 0, Symbol("field"), Symbol()],
+          code: "too_big",
+          maximum: 10,
+          minimum: 1,
+          received: "secret",
+          values: ["private", "schema"],
+          message: "Expected a private schema value",
+        },
+        { path: ["amount"], code: "too_big", maximum: 10n, minimum: "1" },
+      ],
+    } as const;
+    const projected: ValidationIssue[] = validationIssues(validationError);
+
+    expect(projected).toEqual([
+      { path: ["items", 0, "field", ""], code: "too_big", maximum: 10, minimum: 1 },
+      { path: ["amount"], code: "too_big" },
+    ]);
+    expect(() => JSON.stringify(projected)).not.toThrow();
+    expect(JSON.stringify(projected)).not.toContain("secret");
+    expect(JSON.stringify(projected)).not.toContain("private");
+  });
 
   it("answers 400 with the path and the rule", () => {
     const parsed = schema.safeParse({ days: "90", timeoutMs: 1 });
