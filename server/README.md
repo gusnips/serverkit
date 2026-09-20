@@ -42,6 +42,18 @@ paginated(rows, { total: 128, limit: 20, offset: 100 });
 `hasMore` is computed from the rows you actually returned, not from `limit`, so a page cut short
 by a filter still answers honestly.
 
+**What comes back is an answer, not a body.** A framework wants the `body`:
+
+```ts
+return c.json(ok(data), 200); // WRONG: {"status":200,"body":{"data":…}}
+return c.json(ok(data).body, 200); // the envelope
+```
+
+Nothing catches the first line. `c.json` takes any JSON value, so the types hold; the status is
+still 200, so a health probe and a deploy gate both pass; and a test that calls `ok` never sees
+the body its caller sends. That shipped, and a client found it fifty minutes later. On Hono,
+import the four adapters from `@gusnips/server/hono` and the question does not arise.
+
 ## Refusing a request
 
 Declare your own codes and what status each one answers with. The `satisfies` is the line that
@@ -255,6 +267,19 @@ app.use(errorBoundary); // right after
 app.onError(errorHandler({ errorResponse, logger }));
 app.notFound(notFoundHandler(errorResponse(errors.notFound("Route"))));
 ```
+
+```ts
+import { created, noContent, ok, paginated } from "@gusnips/server/hono";
+
+app.get("/users/:id", (c) => ok(c, user)); // { data: user }, 200
+app.post("/users", (c) => created(c, user)); // 201
+app.get("/users", (c) => paginated(c, rows, { total, limit, offset }));
+app.delete("/users/:id", (c) => noContent(c)); // 204, no body, no content-type
+```
+
+Three adopters wrote those four functions by hand before they were here, and one of the three
+got the unwrap wrong in production. `ok` takes an explicit status for the cases that are not
+200 — `ok(c, job, 202)` where the route accepted rather than answered.
 
 **`errorBoundary` is not optional.** Hono hands `onError` only what is `instanceof Error`.
 Anything else is rethrown past every layer and escapes as an unhandled rejection: no answer, a
