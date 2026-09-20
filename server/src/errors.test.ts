@@ -16,18 +16,18 @@ describe("toMessage", () => {
     expect(toMessage("just a string")).toBe("just a string");
   });
 
-  it("serializes a plain object with no message rather than flattening it", () => {
-    const out = toMessage({ code: "PGRST205", hint: "run the migration" });
-    expect(out).not.toBe("[object Object]");
-    expect(out).toContain("PGRST205");
-    expect(out).toContain("run the migration");
+  it("names the code of a plain object with no message, and nothing else off it", () => {
+    // Not "[object Object]", which masks the failure, and not the whole object either: this
+    // string becomes an Error's message, and a message reaches the log past every allow-list.
+    const thrown = { code: "PGRST205", hint: "run the migration", query: "where card = '4242'" };
+
+    expect(toMessage(thrown)).toBe("A thrown object with no message (code PGRST205)");
+    expect(toMessage({ code: 42501 })).toBe("A thrown object with no message (code 42501)");
   });
 
-  it("survives a circular object", () => {
-    const cycle: Record<string, unknown> = { code: "E_CYCLE" };
-    cycle.self = cycle;
-    expect(() => toMessage(cycle)).not.toThrow();
-    expect(toMessage(cycle)).toContain("E_CYCLE");
+  it("says only that there was no message when there is no code either", () => {
+    expect(toMessage({ card: "4242424242424242" })).toBe("A thrown object with no message");
+    expect(toMessage([1, 2])).toBe("A thrown object with no message");
   });
 
   it("falls back to String() for a primitive", () => {

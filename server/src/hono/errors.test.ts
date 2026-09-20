@@ -87,6 +87,22 @@ describe("errorBoundary", () => {
     expect(JSON.stringify(lines)).not.toMatch(/4242|someone@/);
   });
 
+  it("names a thrown object with no message by its code, and leaves the rest to the cause", async () => {
+    const { app, lines } = setup();
+    app.get("/cards", () => {
+      throw { code: "PGRST205", hint: "run the migration", query: "where number = '4242'" };
+    });
+
+    await app.request("/cards");
+
+    const failed = lines.find((line) => line.message === "request failed");
+    expect(failed?.error).toMatchObject({
+      message: "A thrown object with no message (code PGRST205)",
+      cause: { code: "PGRST205", hint: "run the migration" },
+    });
+    expect(JSON.stringify(lines)).not.toContain("4242");
+  });
+
   it("hands a real Error through as the same instance", async () => {
     const thrown = new TypeError("x is undefined");
     const { app, onUnexpected } = setup();

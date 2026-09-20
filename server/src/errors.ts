@@ -197,31 +197,6 @@ export function createAppError<S extends Record<string, number>, Key extends str
 }
 
 /**
- * `JSON.stringify` that never throws and never answers `"[object Object]"`.
- *
- * Private on purpose: it exists for {@link toMessage}'s last branch. A logger wants a richer
- * one (an allow-list over an error's own fields), which is a different function.
- */
-function safeStringify(value: unknown): string {
-  const seen = new WeakSet<object>();
-  try {
-    return (
-      JSON.stringify(value, (_key, val: unknown) => {
-        if (val instanceof Error) return { name: val.name, message: val.message };
-        if (typeof val === "bigint") return val.toString();
-        if (typeof val === "object" && val !== null) {
-          if (seen.has(val)) return "[Circular]";
-          seen.add(val);
-        }
-        return val;
-      }) ?? "null"
-    );
-  } catch {
-    return "[unserializable]";
-  }
-}
-
-/**
  * Turn any thrown value into a string.
  *
  * The single home for the `err instanceof Error ? err.message : String(err)` idiom, which is
@@ -232,15 +207,19 @@ function safeStringify(value: unknown): string {
  *    Six donors fixed this half.
  * 2. An object with no string `message` still flattens to `"[object Object]"`, which is the
  *    real failure masked by a useless string. One donor fixed that half and named it exactly:
- *    *"masking the real failure."* Its version is the one here.
+ *    *"masking the real failure."* It fixed it by serializing the whole object, though, and this
+ *    string becomes an Error's message, which reaches the log past every allow-list. So an object
+ *    is named by its `code` and nothing else off it; the rest travels as the `cause`, where the
+ *    logger's allow-list does read it.
  */
 export function toMessage(err: unknown): string {
   if (err instanceof Error) return err.message;
   if (typeof err === "string") return err;
   if (typeof err === "object" && err !== null) {
-    const { message } = err as { message?: unknown };
-    if (typeof message === "string") return message;
-    return safeStringify(err);
+    if ("message" in err && typeof err.message === "string") return err.message;
+    if ("code" in err && (typeof err.code === "string" || typeof err.code === "number"))
+      return `A thrown object with no message (code ${String(err.code)})`;
+    return "A thrown object with no message";
   }
   return String(err);
 }
