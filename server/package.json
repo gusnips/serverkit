@@ -1,10 +1,10 @@
 {
   "name": "@gusnips/server",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "description": "The layer under a TypeScript backend: one error shape, one response envelope, one retry rule, one logger.",
   "type": "module",
   "license": "MIT",
-  "author": "Gustavo Salom\u00e9",
+  "author": "Gustavo Salomé",
   "homepage": "https://github.com/gusnips/serverkit/tree/main/server#readme",
   "bugs": {
     "url": "https://github.com/gusnips/serverkit/issues"
