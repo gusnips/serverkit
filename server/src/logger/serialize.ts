@@ -94,8 +94,15 @@ function keptValue(key: string, value: unknown): unknown {
  * A plain object passed directly as `meta.error` is the other door. Hono wraps it, but a worker,
  * a fire-and-forget catch or a database client outside Hono does not. `error` is the raw-error slot
  * the logger documents, so it gets the same treatment as `cause`; an ordinary metadata object under
- * any other key stays untouched. `name` and `message` come along because a rejection object usually
- * carries them and a line with neither says nothing at all.
+ * any other key stays untouched. `name`, `message` and `stack` come along because a rejection
+ * object usually carries them and a line with none of them says nothing at all.
+ *
+ * `stack` is here because an adopter's queue found it missing. A job that dies is stored by its
+ * queue through a serializer, so the error reaching the dead-letter handler is a plain object with
+ * its stack in a string — and that stack is the whole of the "why" in a line whose job is to say
+ * which job died and why. The Error branch below has always written `stack` unfiltered; leaving it
+ * out here was an asymmetry, not a decision. It is a conventional field name, not one an SDK hangs
+ * its own inputs off, which is what the allow-list exists to stop.
  *
  * Deliberate state it does NOT keep: context an app attaches on purpose. That belongs in the
  * logger's `meta`, which is untouched — `cause` is not the place for it, and one incident of a
@@ -108,13 +115,15 @@ export function narrowErrorLike(value: object): Record<string, unknown> {
 function narrow(value: object, seen: WeakSet<object>): Record<string, unknown> {
   seen.add(value);
   const out: Record<string, unknown> = {};
-  const { name, message, cause } = value as {
+  const { name, message, stack, cause } = value as {
     name?: unknown;
     message?: unknown;
+    stack?: unknown;
     cause?: unknown;
   };
   if (typeof name === "string") out.name = name;
   if (typeof message === "string") out.message = message;
+  if (typeof stack === "string") out.stack = stack;
   for (const [k, v] of Object.entries(value)) {
     if (KEPT_ERROR_FIELDS.has(k)) out[k] = keptValue(k, v);
   }

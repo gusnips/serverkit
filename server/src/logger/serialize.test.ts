@@ -221,6 +221,31 @@ describe("what an Error contributes to a log line", () => {
     expect(JSON.stringify(line)).not.toContain("4242");
   });
 
+  it("keeps the stack of an error that crossed a queue and arrived as a plain object", () => {
+    // A job queue stores a failed job's error through a serializer, so the dead-letter handler is
+    // handed a plain object — and the stack is the whole of the "why" in a line whose job is to
+    // say which job died and why. Everything the SDK hung beside it still goes.
+    const stored = {
+      name: "HttpError",
+      message: "Not Found",
+      stack: "HttpError: Not Found\n    at workers.ts:1:1",
+      status: 404,
+      request: { method: "GET", body: '{"query":"private"}' },
+    };
+
+    const line = JSON.parse(JSON.stringify({ error: stored }, errorReplacer())) as Record<
+      string,
+      Record<string, unknown>
+    >;
+
+    expect(line.error).toEqual({
+      name: "HttpError",
+      message: "Not Found",
+      stack: "HttpError: Not Found\n    at workers.ts:1:1",
+      status: 404,
+    });
+  });
+
   it("allow-lists a thrown plain object passed directly as the error", () => {
     // Hono wraps a non-Error throw as a cause, but workers, fire-and-forget catches and a database
     // client's `{ code, message, details }` rejection reach the logger directly. `error` is the
