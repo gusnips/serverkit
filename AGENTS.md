@@ -72,7 +72,7 @@ Tests do not run in CI (the fleet's CI minutes policy). Run them before every co
   bites with one package, and both will the day a second package depends on this one.
   `release:check` already checks both.
 - **Adopters resolve from the registry**, never `link:` or `file:`.
-- **Nothing is published or pushed without Gus.** The GitHub repo does not exist yet.
+- **Nothing is published or pushed without Gus.**
 
 ## Invariants — do not regress these
 
