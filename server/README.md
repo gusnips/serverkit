@@ -1,8 +1,8 @@
 # @gusnips/server
 
-One error shape, one response envelope, and one function that turns a thrown thing into an HTTP
-answer. No framework at the root: it runs in a Cloudflare Worker, in a Bun or Node server, in a
-queue consumer, and in an MCP tool handler.
+One error shape, one response envelope, one allow-list logger, and one function that turns a
+thrown thing into an HTTP answer. No framework at the root: it runs in a Cloudflare Worker, in a
+Bun or Node server, in a queue consumer, and in an MCP tool handler.
 
 ```bash
 bun add @gusnips/server @gusnips/http
@@ -199,6 +199,167 @@ nothing, and it is the last thing telling a client whether waiting can help.
 
 **An unexpected throw never reaches the client.** Log it with its `cause` and its stack; answer
 the generic 500.
+
+## Writing logs
+
+`createLogger` writes one JSON object per line. Call it once, then pass the logger to the code that
+needs it.
+
+```ts
+import { createLogger } from "@gusnips/server";
+
+const logger = createLogger();
+logger.info("server started");
+// → { "level": "info", "time": "…", "message": "server started" }
+```
+
+It has `debug`, `info`, `warn` and `error` methods. The default threshold is `info`; pass the
+setting your runtime owns when it should differ:
+
+```ts
+const logger = createLogger({ level: process.env.LOG_LEVEL });
+```
+
+An unknown level throws at boot instead of quietly changing what the box records. Use `silent` to
+write nothing. Pass `write(line, level)` when a process manager is not the only destination; it is
+a seam for your exporter, not a transport built into this package.
+
+Pass the raw error, never `String(error)`:
+
+```ts
+try {
+  await charge(order);
+} catch (error) {
+  logger.error("charge failed", { orderId: order.id, error });
+}
+```
+
+The serializer writes an error's `name`, `message`, `stack` and `cause`, plus only the extra fields
+in `keptErrorFields`. A plain-object cause goes through the same list. Circular values do not break
+the log call, and a Postgres `DETAIL` containing the whole failed row is replaced rather than
+written. The allow-list covers errors, not arbitrary metadata: never put a password, token or raw
+request body in the metadata object.
+
+## Using Hono
+
+The root package does not load Hono. Install Hono and import the adapter only in an app that uses
+it:
+
+```bash
+bun add hono @gusnips/server @gusnips/http
+```
+
+Put `RequestVariables<ErrorCode>` in the app's `Variables`, mount the request logger first, then the
+boundary:
+
+```ts
+import { createLogger } from "@gusnips/server";
+import {
+  errorBoundary,
+  errorHandler,
+  notFoundHandler,
+  requestLogger,
+  type RequestVariables,
+} from "@gusnips/server/hono";
+import { Hono } from "hono";
+import { errorResponse, errors, type ErrorCode } from "./errors.ts";
+
+type AppEnv = {
+  Bindings: { API_ORIGIN: string };
+  Variables: RequestVariables<ErrorCode>;
+};
+
+const app = new Hono<AppEnv>();
+const logger = createLogger();
+
+app.use(requestLogger({ logger }));
+app.use(errorBoundary);
+
+app.onError(errorHandler({ errorResponse, logger }));
+app.notFound(notFoundHandler(errorResponse(errors.notFound("Route"))));
+```
+
+Pass `errorHandler(...)` and `notFoundHandler(...)` straight to Hono as shown. That call gives
+TypeScript the app's full environment, including its `Bindings`; storing a handler first throws
+that context away and can widen its types.
+
+The boundary turns a thrown value that is not an `Error` into one and keeps the original as its
+`cause`. Without it, Hono does not call `onError` for that value. The error handler writes 5xx and
+unexpected failures with their raw error. A routine 4xx writes no second line: its code goes on the
+request line. Pass `onUnexpected` to `errorHandler` when that last branch should alert someone. The
+callback runs inside Hono's error path, so it must not throw; hand slow work off instead of waiting
+for it.
+
+### Request logs and IDs
+
+Each completed request line has `requestId`, `method`, `route`, `status`, `ms` and, on a refusal,
+`errorCode`. `route` is the matched template, such as `/people/:id`, never the caller's path. If a
+dashboard or alert reads a `path` field from an older request logger, move it to `route` when you
+adopt this one.
+
+A valid incoming `X-Request-ID` is kept; anything longer than 64 characters or outside
+`A-Z a-z 0-9 . _ -` is replaced. Every response returns the final id. A browser may read it across
+origins only when CORS exposes it:
+
+```ts
+import { cors } from "hono/cors";
+
+app.use("*", cors({ exposeHeaders: ["X-Request-ID"] }));
+```
+
+`OPTIONS`, `/health` and everything below `/health` are quiet by default. A throw is still logged.
+Use `skipPaths` only for other routine endpoints.
+
+### Route guards
+
+Wrap a guard where it is defined, then mount that same function before the routes it protects:
+
+```ts
+import { guard } from "@gusnips/server/hono";
+import { requireAdminMiddleware } from "./auth.ts";
+
+export const requireAdmin = guard(requireAdminMiddleware);
+
+app.use("/admin/*", requireAdmin);
+```
+
+In one test of the fully built app, ask Hono's own matcher whether a guard runs before every private
+endpoint:
+
+```ts
+import { assertEveryRouteGuarded } from "@gusnips/server/hono";
+import { app } from "./app.ts";
+import { isPublic } from "./public-routes.ts";
+
+assertEveryRouteGuarded(app, { isPublic });
+```
+
+Pass the predicate the app itself uses. Do not make a second exemption list only for this test. If
+the app's rule is already a list of prefixes, build the shared predicate with `underAny`:
+
+```ts
+import { underAny } from "@gusnips/server/hono";
+
+export const isPublic = underAny(["/health", "/webhooks/*"]);
+```
+
+`/webhooks` and `/webhooks/*` both cover `/webhooks` and `/webhooks/provider`, but not
+`/webhooks-old`. The check uses Hono's real matcher and registration order, so it catches a guard
+mounted after its route. It also refuses an app with no endpoints and a guard that runs in front of
+nothing; both often mean a test mounted a stand-in router instead of the real one.
+
+### Keep one Hono copy
+
+The app and `@gusnips/server/hono` must resolve the same Hono runtime copy. Hono stores route-match
+state under a symbol local to its copy, so a second copy cannot read the first one's match. If route
+logging fails after installation, check the tree:
+
+```bash
+bun pm ls hono
+```
+
+Use one Hono version that satisfies the package's peer range. A nested second copy is an install
+fault, not a request-logger failure.
 
 ## What this package does not ship
 

@@ -8,7 +8,8 @@
  * of "an unexpected error occurred". A fourth re-derived the error body inside a background
  * worker's health handler and got it wrong, answering a caught Redis message on a 503 — the
  * API next door masks exactly that. A `Context`-shaped function would serve one of those four
- * callers. The framework adapter is eight lines and lives in `/hono`.
+ * callers. The framework adapter is nine statements — fourteen formatted lines — and lives
+ * in `/hono`.
  */
 import type { ApiError, ApiSuccess, PaginationMeta } from "@gusnips/http";
 import { AppError } from "./errors.ts";
