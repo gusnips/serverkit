@@ -2,9 +2,14 @@ Entry point for AI agents working on this repo.
 
 # serverkit
 
-**The layer under a Bun or Node server on Postgres.** One package today: `@gusnips/migrate`, which
-applies plain `.sql` files, writes TypeScript types from the live schema, and gives a stock Postgres
-in CI the roles and `auth` tables a Supabase database starts with.
+**The layer under a Bun or Node server on Postgres.** Two packages:
+
+- **`@gusnips/migrate`** applies plain `.sql` files, writes TypeScript types from the live schema,
+  and gives a stock Postgres in CI the roles and `auth` tables a Supabase database starts with.
+- **`@gusnips/server`** is the answer edge: the error class, the wire envelope and its mask, the
+  JSON logger, and a `/hono` subpath with the middleware and the four success adapters. One
+  required peer, `@gusnips/http`, and only its types, which erase; `hono` is optional and
+  reachable only behind the subpath.
 
 MIT · open source · npm scope `@gusnips`
 
@@ -36,6 +41,12 @@ serverkit/
 │   │   ├── bin/          ← one bin, gusnips-migrate, which dispatches its two commands
 │   │   └── test/         ← the throwaway-database helpers the tests share
 │   └── sql/              ← supabase-stand-in.sql, also exported for `psql -f`
+├── server/               ← @gusnips/server. hono is an optional peer, only behind /hono.
+│   └── src/
+│       ├── errors.ts     ← AppError and createAppError(): your code→status map is the contract
+│       ├── responses.ts  ← the envelope both ways: ok/created/paginated, and createErrorResponse
+│       ├── logger/       ← createLogger() and the serializer that decides what a log line keeps
+│       └── hono/         ← the edge: errorBoundary, errorHandler, guards, and the four adapters
 ├── scripts/
 │   └── check-release.ts  ← packs each package and checks what the registry would get
 └── AGENTS.md             ← this file
@@ -55,8 +66,9 @@ bun run release:check        # what the REGISTRY would get: pack, unpack, run un
 bun run format
 ```
 
-The tests are integration tests against a real Postgres. Each creates its own database and drops it
-after. `TEST_DATABASE_URL` must be on this machine; `test/db.ts` refuses anything else, because the
+`@gusnips/server` has no database and no server in its tests: they drive a real Hono app and read
+the bytes back. `migrate`'s are integration tests against a real Postgres. Each creates its own
+database and drops it after. `TEST_DATABASE_URL` must be on this machine; `test/db.ts` refuses anything else, because the
 tests create roles, drop databases and end sessions. Roles belong to the whole cluster, so
 `test/global-setup.ts` creates them once before the files run in parallel.
 
@@ -181,6 +193,60 @@ because the brackets reach the DNS lookup, while `host: "::1"` connects. Measure
 both Bun 1.3.8 and Node 22. It is the driver's, not the runner's, and `describeTarget` stripping the
 brackets is still right for the guard. Someone on IPv6 loopback writes `localhost` or passes the
 host outside the URL.
+
+### …and seven for `@gusnips/server`
+
+21. **A success builder returns an ANSWER, not a body — so on Hono, import the adapters.** `ok`,
+    `created`, `paginated` and `noContent` in `responses.ts` answer `{ status, body }`, because the
+    layer is framework-free and owes its caller a status. Three of three Hono adopters therefore
+    wrote the same four unwrapping lines by hand, and one wrote `c.json(ok(data))` instead of
+    `c.json(ok(data).body)`: every 200 from a live API answered `{"status":200,"body":{"data":…}}`
+    for fifty minutes. **Nothing caught it and nothing could** — `c.json` takes any JSON value so
+    the types held, the status stayed 200 so every probe and the deploy gate held, and a test that
+    calls the builder never sees the body its caller sends. A client found it, because a client is
+    the only reader that parses the envelope. `@gusnips/server/hono` ships the four adapters, so
+    the wrong line is not available to write. `noContent` is the half a hand-written adapter gets
+    wrong quietly: `c.body(null, 204)`, where `c.json(null, 204)` writes the four bytes `null` and
+    a `content-type` under a status that promises neither.
+22. **`AppError` defines no `toJSON()`.** `JSON.stringify` calls a value's own `toJSON()` **before**
+    the replacer, so an error class that defines one hands a logger whatever that method returns
+    instead of the error. Seven backends define one, and all seven log
+    `{"error":{"error":{code,message}}}` — doubly nested, no `stack`, no `cause` — from a line that
+    still looks like a log line. Our replacer recovers a foreign class from the holder; the fix for
+    our own class is not to have the method.
+23. **The mask is by CODE, not by status.** `maskedCodes` defaults to `["INTERNAL_ERROR"]`. Masking
+    every 5xx flattens a `SERVICE_UNAVAILABLE` into a generic 500 and takes away the one thing
+    telling a client whether to wait — in one adopter it made five authored 503 messages, one of
+    them written in three locales, unreachable copy. **That default is safe because of the call
+    sites, not because of this code**: it holds only while every non-masked 5xx carries a sentence
+    somebody wrote for a client. A repo whose repository layer interpolates the driver's message
+    wants `maskAll`.
+24. **A 429 factory must state its wait, and `null` is one of the answers.** `createAppError` reads
+    the literal types of your code→status map, so a 429 arm cannot compile without `retryAfterSecs`
+    — which is cheap, because 34 of 40 raises across the fleet already stated one. `null` is the
+    other half and the six durable caps are what proved it necessary: a concurrency slot frees when
+    somebody else's job ends, and a cap on live objects clears by archiving one. A required `number`
+    would have forced both to invent one. **An omission is invisible in a diff; a `null` is a claim
+    somebody has to read** — and it is the claim that lets a client delete its hand-maintained list
+    of durable codes.
+25. **The mask is bound once, at the edge.** `createErrorResponse` returns the function every door
+    imports — the API, a tool wrapper, a worker's health port. The reading found the alternative:
+    four places in one fleet deciding the mask separately, and the one furthest from the API getting
+    it wrong.
+26. **A log line's error slot allow-lists what a non-`Error` may contribute.** A deny-list has to
+    know `payload`, `header`, `raw`, `command`, `where` and the next vendor's word for it, and it
+    learns each one from an incident. Measured: a webhook error carries the unverified request body,
+    so an unauthenticated route let anyone on the internet write into the log; a Redis AUTH failure
+    carries the password in `command.args`; and a Postgres `DatabaseError` carries statement text
+    with its literals in `where` and `internalQuery` — reproduced on Postgres 18 with an e-mail
+    address and a card number in it. **`stack` is kept**, because a job that dies crosses its queue
+    through a serializer and arrives as a plain object, in the one line whose job is to say which
+    job died and why.
+27. **`assertEveryRouteGuarded` probes the router, and refuses an app with no endpoints.** It asks
+    the real matcher which handlers run before each route, rather than reading the code, so a guard
+    mounted on the wrong prefix is caught. The empty-app refusal is the important line: a check over
+    zero routes passes by asking nothing, which is a guard that has never fired dressed as a green
+    one.
 
 ## What the build measured
 
