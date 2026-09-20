@@ -194,7 +194,7 @@ both Bun 1.3.8 and Node 22. It is the driver's, not the runner's, and `describeT
 brackets is still right for the guard. Someone on IPv6 loopback writes `localhost` or passes the
 host outside the URL.
 
-### …and seven for `@gusnips/server`
+### …and eight for `@gusnips/server`
 
 21. **A success builder returns an ANSWER, not a body — so on Hono, import the adapters.** `ok`,
     `created`, `paginated` and `noContent` in `responses.ts` answer `{ status, body }`, because the
@@ -247,6 +247,31 @@ host outside the URL.
     mounted on the wrong prefix is caught. The empty-app refusal is the important line: a check over
     zero routes passes by asking nothing, which is a guard that has never fired dressed as a green
     one.
+28. **The package binds a code union at the RAISE site and cannot bind it at the CATCH site — so an
+    adopter with a closed code list writes two lines, and needs to be told.** `createAppError` reads
+    a status map's literal types, so a raise is checked. `AppError` and `AppErrorOptions` are
+    generic with `= string` defaults, because this package ships no code list; re-export either name
+    plainly and every `: AppError` annotation in the adopter becomes `code: string` and every
+    factory's `messageKey` widens out of its union. That is silent — it compiles, it passes, and the
+    next `switch (err.code)` simply stops being exhaustive. One adopter had **fourteen** such
+    annotations and exactly one line the compiler could object to (`EXHAUSTED.has(err.code)`), so
+    thirteen would have downgraded with nothing to show for it.
+
+    A function cannot return a type, so there is no version of `createAppError` that closes this.
+    What the package owes is the recipe, and it costs nothing because **TypeScript keeps types and
+    values in separate declaration spaces**:
+
+    ```ts
+    import { AppError as PkgAppError } from "@gusnips/server";
+    import type { AppErrorOptions as PkgAppErrorOptions } from "@gusnips/server";
+
+    export const AppError = PkgAppError; // what you `instanceof`
+    export type AppError = PkgAppError<ErrorCode, MessageKey>; // what annotations resolve to
+    export type AppErrorOptions = PkgAppErrorOptions<MessageKey>;
+    ```
+
+    One name, no rename across call sites, and no cast. An adopter whose codes are open needs none
+    of it — which is why this is an adopter's line and not a change to the generics' defaults.
 
 ## What the build measured
 
