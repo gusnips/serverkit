@@ -270,7 +270,9 @@ Add safe product metadata with `requestLogger<AppEnv>({ logger, fields: (c) => (
 `fields` runs after the response exists, so it can read values a handler set and `c.res`; return only
 bounded, sanitized values, never a raw path, query, header set, body or authentication object. Your
 fields are written first, so they cannot replace the canonical request id, method, route, status,
-duration or error code.
+duration or error code. A hook that throws is caught: the line is written with
+`requestFieldsFailed: true` instead of your fields. A value whose own `toJSON` throws is not — that
+one loses the whole line, request id included — so return plain data, not live objects.
 
 The request id goes back on `X-Request-ID`, on every answer including `onError`'s and
 `notFound`'s. A caller's own id is echoed only if it is 64 characters of `A-Z a-z 0-9 . _ -`,

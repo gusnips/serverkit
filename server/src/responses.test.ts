@@ -137,6 +137,17 @@ describe("a validation failure is a 400 that reflects nothing back", () => {
     expect(JSON.stringify(projected)).not.toContain("private");
   });
 
+  it("answers rather than throws when an issue arrives without a usable path", () => {
+    // The gate admits anything named ZodError with an array of issues, so an element that lost a
+    // field crossing a queue or a tool boundary reaches the projection. Throwing here throws
+    // inside the function whose whole job is to turn a thrown thing into an answer.
+    for (const issue of [{ code: "custom" }, null, { path: "amount", code: "too_big" }]) {
+      const answer = errorResponse({ name: "ZodError", issues: [issue] });
+      expect(answer.status).toBe(400);
+      expect(answer.body.error.details).toEqual([{ path: [], code: issue?.code ?? "" }]);
+    }
+  });
+
   it("answers 400 with the path and the rule", () => {
     const parsed = schema.safeParse({ days: "90", timeoutMs: 1 });
     const answer = errorResponse(parsed.error);

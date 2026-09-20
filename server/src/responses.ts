@@ -152,9 +152,14 @@ function envelope<Code extends string, Key extends string>(
   };
 }
 
+/**
+ * What an issue MIGHT carry — every field optional, because the gate below proves only that
+ * `issues` is an array and nothing at all about an element. Typing the element as certain is
+ * what turned this projection into a throw: `path.map` on an issue that arrived without one.
+ */
 interface RawIssue {
-  readonly path: readonly PropertyKey[];
-  readonly code: string;
+  readonly path?: unknown;
+  readonly code?: unknown;
   readonly maximum?: unknown;
   readonly minimum?: unknown;
 }
@@ -186,6 +191,18 @@ function zodIssues(err: unknown): RawIssue[] | null {
 }
 
 /**
+ * One path segment, as something that survives `JSON.stringify`.
+ *
+ * A symbol keyed a field the caller cannot name back at us, so its description is the only
+ * useful thing in it — and an unnamed symbol has none, which is an empty segment rather than
+ * the `null` that `JSON.stringify` would otherwise write.
+ */
+function pathSegment(segment: unknown): string | number {
+  if (typeof segment === "symbol") return segment.description ?? "";
+  return typeof segment === "number" ? segment : String(segment);
+}
+
+/**
  * The field path, the rule it failed, and — for a range — the BOUND it failed against.
  *
  * Never the rejected value, and never the schema's internals. All six donors carry a version of
@@ -198,17 +215,20 @@ function zodIssues(err: unknown): RawIssue[] | null {
  *
  * The bound is the exception, and it belongs to the caller: it is the published contract, and
  * a `too_big` without it costs somebody a bisect to rediscover a number our own docs state.
+ *
+ * Total on purpose: this runs inside the function that turns a thrown thing into an answer, and
+ * it is advertised to the queue and tool doors, where an issue list has crossed a serialization
+ * hop. An allow-list that throws on a malformed issue sends its caller back to shipping the
+ * validator's issues raw, which is the disclosure it exists to prevent.
  */
 export function validationIssues(error: {
   readonly issues: readonly RawIssue[];
 }): ValidationIssue[] {
   return error.issues.map((issue): ValidationIssue => {
-    const { maximum, minimum } = issue;
+    const { path, code, maximum, minimum } = issue ?? {};
     return {
-      path: issue.path.map((segment) =>
-        typeof segment === "symbol" ? (segment.description ?? "") : segment,
-      ),
-      code: issue.code,
+      path: Array.isArray(path) ? path.map(pathSegment) : [],
+      code: typeof code === "string" ? code : "",
       ...(typeof maximum === "number" && { maximum }),
       ...(typeof minimum === "number" && { minimum }),
     };

@@ -17,6 +17,10 @@ export interface RequestLoggerOptions<E extends RequestLoggerEnv = RequestLogger
    * Sanitized product fields to add to the request line. Runs after the response exists, so it can
    * read downstream variables and `c.res`. Keep caller-controlled values bounded; never return a
    * raw path, query, header set, body or authentication object.
+   *
+   * Return plain data, not live objects: a throw from this hook is caught, but a value whose own
+   * `toJSON` throws is caught by the logger instead, which costs the whole line rather than the
+   * field.
    */
   fields?: (c: Context<E>) => Record<string, unknown>;
   /**
