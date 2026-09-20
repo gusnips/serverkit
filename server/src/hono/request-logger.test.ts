@@ -7,20 +7,92 @@ import {
   type RequestVariables,
 } from "./request-logger.ts";
 
-function setup(options: Omit<RequestLoggerOptions, "logger"> = {}) {
+function setup<E extends { Variables: RequestVariables } = { Variables: RequestVariables }>(
+  options: Omit<RequestLoggerOptions<E>, "logger"> = {},
+) {
   const lines: Array<Record<string, unknown>> = [];
   const logger = createLogger({
     level: "debug",
     write: (line) => lines.push(JSON.parse(line) as Record<string, unknown>),
   });
-  const app = new Hono<{ Variables: RequestVariables }>();
-  app.use(requestLogger({ logger, ...options }));
+  const app = new Hono<E>();
+  app.use(requestLogger<E>({ logger, ...options }));
   return { app, lines };
 }
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
+type AppEnv = {
+  Variables: RequestVariables<"DENIED"> & { actorId: string };
+};
+
 describe("the request line", () => {
+  it("adds typed adopter fields after the response exists", async () => {
+    const { app, lines } = setup<AppEnv>({
+      fields: (c) => ({ actorId: c.get("actorId"), responseStatus: c.res.status }),
+    });
+    app.post("/items", (c) => {
+      c.set("actorId", "user_1");
+      return c.text("created", 201);
+    });
+
+    await app.request("/items", { method: "POST" });
+
+    expect(lines[0]).toMatchObject({ actorId: "user_1", responseStatus: 201 });
+  });
+
+  it("keeps every canonical request field when adopter fields use the same names", async () => {
+    const { app, lines } = setup<AppEnv>({
+      fields: () => ({
+        actorId: "user_1",
+        requestId: "wrong",
+        method: "DELETE",
+        route: "/wrong",
+        status: 599,
+        ms: -1,
+        errorCode: "WRONG",
+      }),
+    });
+    app.post("/items/:id", (c) => {
+      c.set("errorCode", "DENIED");
+      return c.text("no", 403);
+    });
+
+    await app.request("/items/secret", {
+      method: "POST",
+      headers: { "X-Request-ID": "trace_1" },
+    });
+
+    expect(lines[0]).toMatchObject({
+      actorId: "user_1",
+      requestId: "trace_1",
+      method: "POST",
+      route: "/items/:id",
+      status: 403,
+      errorCode: "DENIED",
+    });
+    expect(lines[0]!.ms).not.toBe(-1);
+  });
+
+  it("does not let a broken adopter field hook lose the response or its request line", async () => {
+    const { app, lines } = setup<AppEnv>({
+      fields: () => {
+        throw new Error("field hook broke");
+      },
+    });
+    app.get("/items", (c) => c.text("ok"));
+
+    const response = await app.request("/items");
+
+    expect(response.status).toBe(200);
+    expect(lines[0]).toMatchObject({
+      requestFieldsFailed: true,
+      method: "GET",
+      route: "/items",
+      status: 200,
+    });
+  });
+
   it("names the route template, never the path", async () => {
     // A path carries whatever the caller put in it. In one backend that was a customer's national
     // id number, and the request line carried it into the log and on into an analytics event.

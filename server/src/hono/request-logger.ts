@@ -1,4 +1,4 @@
-import type { MiddlewareHandler } from "hono";
+import type { Context, MiddlewareHandler } from "hono";
 import { routePath } from "hono/route";
 import type { Logger } from "../logger/index.ts";
 
@@ -9,8 +9,16 @@ export interface RequestVariables<Code extends string = string> {
   errorCode: Code | null;
 }
 
-export interface RequestLoggerOptions {
+type RequestLoggerEnv = { Variables: RequestVariables };
+
+export interface RequestLoggerOptions<E extends RequestLoggerEnv = RequestLoggerEnv> {
   logger: Logger;
+  /**
+   * Sanitized product fields to add to the request line. Runs after the response exists, so it can
+   * read downstream variables and `c.res`. Keep caller-controlled values bounded; never return a
+   * raw path, query, header set, body or authentication object.
+   */
+  fields?: (c: Context<E>) => Record<string, unknown>;
   /**
    * Paths answered but never logged, each with everything under it: `/health` covers
    * `/health/db` and not `/healthz`. Defaults to `["/health"]`. A throw is logged anyway.
@@ -25,6 +33,20 @@ export interface RequestLoggerOptions {
  */
 const REQUEST_ID = /^[A-Za-z0-9._-]{1,64}$/;
 
+function collectFields<E extends RequestLoggerEnv>(
+  fields: RequestLoggerOptions<E>["fields"],
+  c: Context<E>,
+): Record<string, unknown> {
+  if (fields === undefined) return {};
+  try {
+    // Materialize here too: a throwing getter is just as capable of losing the request line as a
+    // throwing callback. Logging metadata must never change the response it describes.
+    return { ...fields(c) };
+  } catch {
+    return { requestFieldsFailed: true };
+  }
+}
+
 /**
  * One line per request, and the request id.
  *
@@ -36,10 +58,11 @@ const REQUEST_ID = /^[A-Za-z0-9._-]{1,64}$/;
  * answer including `onError`'s and `notFound`'s. Cross-origin, list that header in your CORS
  * `exposeHeaders` or the browser hides it from the page.
  */
-export function requestLogger({
+export function requestLogger<E extends RequestLoggerEnv = RequestLoggerEnv>({
   logger,
+  fields,
   skipPaths = ["/health"],
-}: RequestLoggerOptions): MiddlewareHandler<{ Variables: RequestVariables }> {
+}: RequestLoggerOptions<E>): MiddlewareHandler<E> {
   return async (c, next) => {
     const supplied = c.req.header("X-Request-ID");
     const requestId = supplied && REQUEST_ID.test(supplied) ? supplied : crypto.randomUUID();
@@ -72,6 +95,7 @@ export function requestLogger({
     // returns a Response it built itself.
     c.header("X-Request-ID", requestId);
     const skipped = skipPaths.some((skip) => path === skip || path.startsWith(`${skip}/`));
-    if (method !== "OPTIONS" && !skipped) logger.info("request", line(c.res.status));
+    if (method !== "OPTIONS" && !skipped)
+      logger.info("request", { ...collectFields(fields, c), ...line(c.res.status) });
   };
 }

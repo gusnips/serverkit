@@ -266,6 +266,12 @@ hypothetical. The boundary wraps one in an `Error` and keeps the original as `ca
 document number in a log and in whatever reads that log afterwards. `/health` is skipped with
 everything under it, because every deploy polls it in a loop; a throw is logged anyway.
 
+Add safe product metadata with `requestLogger<AppEnv>({ logger, fields: (c) => ({ … }) })`.
+`fields` runs after the response exists, so it can read values a handler set and `c.res`; return only
+bounded, sanitized values, never a raw path, query, header set, body or authentication object. Your
+fields are written first, so they cannot replace the canonical request id, method, route, status,
+duration or error code.
+
 The request id goes back on `X-Request-ID`, on every answer including `onError`'s and
 `notFound`'s. A caller's own id is echoed only if it is 64 characters of `A-Z a-z 0-9 . _ -`,
 so the id in a line is always either the caller's or ours. Cross-origin, list that header in your
