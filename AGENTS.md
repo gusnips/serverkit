@@ -366,12 +366,20 @@ host outside the URL.
     handler exits is then killed by a connection nobody was using. Eleven correct copies plus one
     comment each is exactly the case a required field closes for the twelfth.
 
-    **`pingPool` is bounded and the timer is cleared.** Four backends run `SELECT 1` raw, so a
-    hung database hangs `/health` — which an orchestrator reads as "unknown" where `false` would
-    have meant "replace this container"; `connectionTimeoutMillis` does not cover it, because that
-    bounds getting a connection and not the query once you hold one. The one bounded copy in the
-    fleet left its `setTimeout` uncleared, so a process probed every few seconds carried a live
-    timer per probe.
+    **`pingPool` is bounded and the timer is cleared.** A raw `SELECT 1` hangs `/health` when the
+    database hangs — which an orchestrator reads as "unknown" where `false` would have meant
+    "replace this container"; `connectionTimeoutMillis` does not cover it, because that bounds
+    getting a connection and not the query once you hold one.
+
+    **Both counts this paragraph first carried were low, and re-measuring during the sweep is what
+    corrected them.** It said four backends ran `SELECT 1` raw; it is **eight of eleven**, in two
+    different PLACES — four in the pool module, and four with no probe there at all because theirs
+    is inlined in `GET /health` in `apps/api/src/app.ts`. That second group is the lesson: a sweep
+    that patched every pool file reported itself complete and had not touched them, because **a
+    per-file check answers for the file and not for the bug.** What caught it was asking the fleet
+    the question the sweep claimed to have closed, rather than counting the commits it produced.
+    And it said one copy was bounded-but-uncleared; it is **three**, and all three left the
+    `setTimeout` running, so a process probed every few seconds carried a live timer per probe.
 
     **What did NOT come across, and why.** The `ssl` rule: `@gusnips/migrate` already exports
     `pgSsl`, and the nine hand-written copies were byte-identical in the body — only their
