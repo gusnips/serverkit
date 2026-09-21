@@ -208,6 +208,20 @@ host outside the URL.
     the wrong line is not available to write. `noContent` is the half a hand-written adapter gets
     wrong quietly: `c.body(null, 204)`, where `c.json(null, 204)` writes the four bytes `null` and
     a `content-type` under a status that promises neither.
+
+    **And the adapters shipped not delivering that sentence, which is the half worth keeping.** The
+    first version was `ok(c, data, status)` over a builder that takes `ok(data, meta?)` — a wrapper
+    that NARROWED what it wrapped. The fifth adopter is a metered API whose every read answers
+    `{ data, meta }` with what the call cost, and with no slot for it, that repo's `/v1` layer had
+    written its own `ok` building the envelope by hand: the exact line this invariant claims is
+    unavailable, produced BY the adapter's existence rather than in spite of it. Fixed in 0.2.1
+    (`ok<T, M>(c, data, status, meta?)`, generic in the meta like the builder — a page's is
+    `PaginationMeta`, a product's is whatever that product measures, and the package does not get
+    to name it). The general rule underneath: **a wrapper you have to step around for the common
+    case protects nobody**, so an adapter that drops an argument its own builder takes is a bug in
+    the adapter, not a smaller API. Check a wrapper against the signature it wraps, not against how
+    tidy it reads.
+
 22. **`AppError` defines no `toJSON()`.** `JSON.stringify` calls a value's own `toJSON()` **before**
     the replacer, so an error class that defines one hands a logger whatever that method returns
     instead of the error. Seven backends define one, and all seven log
