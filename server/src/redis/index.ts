@@ -123,6 +123,16 @@ export interface AssertRedisOptions extends RedisPingOptions {
    * is why this takes the URL and parses it rather than taking a string to interpolate.
    */
   url?: string;
+  /**
+   * One sentence appended to the message: what to DO about it, here.
+   *
+   * The generic half of this error states what failed and its likely cause, and a package can
+   * know no more than that. The fix is local — "start it (the dev compose runs one)" names a
+   * command that exists in one repo and not the next. Three backends wrote this gate; two said
+   * "check REDIS_URL" and the third named the tool that starts one, and the third is the only
+   * message a reader can act on without knowing the repo already.
+   */
+  hint?: string;
 }
 
 /**
@@ -138,11 +148,12 @@ export interface AssertRedisOptions extends RedisPingOptions {
  */
 export async function assertRedisReachable(
   redis: Pick<IORedis, "ping">,
-  { url, timeoutMs = 5_000, onError }: AssertRedisOptions = {},
+  { url, timeoutMs = 5_000, onError, hint }: AssertRedisOptions = {},
 ): Promise<void> {
   if (await pingRedis(redis, { timeoutMs, onError })) return;
   throw new Error(
-    `Redis at ${redisHost(url)} did not answer PING within ${timeoutMs} ms. It is down, or the URL is wrong.`,
+    `Redis at ${redisHost(url)} did not answer PING within ${timeoutMs} ms. It is down, or the URL is wrong.` +
+      (hint ? ` ${hint}` : ""),
   );
 }
 

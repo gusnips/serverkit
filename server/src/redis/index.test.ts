@@ -121,3 +121,24 @@ describe("assertRedisReachable", () => {
     );
   });
 });
+
+describe("assertRedisReachable's hint", () => {
+  const down = { ping: vi.fn().mockRejectedValue(new Error("ECONNREFUSED")) };
+
+  it("appends what to do about it, which a package cannot know", async () => {
+    // Two of the three hand-written gates said "check REDIS_URL"; the third named the command
+    // that starts one. The third is the only message a reader can act on without already
+    // knowing the repo, and it is the half that has to come from the caller.
+    await expect(
+      assertRedisReachable(down, {
+        url: "redis://127.0.0.1:6379",
+        timeoutMs: 20,
+        hint: "Start it (the dev compose runs one) or fix REDIS_URL.",
+      }),
+    ).rejects.toThrow(/It is down, or the URL is wrong\. Start it \(the dev compose runs one\)/);
+  });
+
+  it("leaves no dangling space when there is no hint", async () => {
+    await expect(assertRedisReachable(down, { timeoutMs: 20 })).rejects.toThrow(/wrong\.$/);
+  });
+});

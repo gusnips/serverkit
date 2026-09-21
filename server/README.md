@@ -480,10 +480,19 @@ A worker gets a boot gate, because a process whose queues can never connect must
 looking healthy — that looks exactly like an empty queue:
 
 ```ts
-await assertRedisReachable(redis, { url: env.REDIS_URL, timeoutMs: 5_000 });
+await assertRedisReachable(redis, {
+  url: env.REDIS_URL,
+  hint: "Start it (the dev compose runs one) or fix REDIS_URL.",
+});
 ```
 
 It takes the URL and parses it so the error can name the host. It never prints the password.
+
+`hint` is the sentence a package cannot write for you. The generic half says what failed and
+its likely cause; the fix is local, and "the dev compose runs one" names a command that exists
+in one repo and not the next. Three backends wrote this gate: two said "check REDIS_URL" and the
+third named the tool, and the third is the only one a reader can act on without knowing the repo
+already.
 
 The client **singleton** stays yours, for the same reason the pool's does: a package that holds
 it decides when your process can exit.
