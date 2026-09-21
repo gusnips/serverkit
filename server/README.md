@@ -370,6 +370,58 @@ caught. A driver's `TypeError` is not an auth outage and answers false.
 `@supabase/supabase-js` is an optional peer, behind the `/supabase` subpath, so importing
 `@gusnips/server` never installs it.
 
+## Postgres
+
+If your API talks to Postgres through `pg`, two lines in the pool decide whether a bad minute
+shows up as an error or as silence.
+
+```bash
+bun add pg
+```
+
+```ts
+import { createPgPool } from "@gusnips/server/pg";
+
+const pool = createPgPool({
+  connectionString: env.DATABASE_URL,
+  onIdleError: (error) => logger.error("[pg] idle client error — client discarded", { error }),
+});
+```
+
+**It bounds the wait for a free connection.** Without `connectionTimeoutMillis`, node-postgres
+puts a caller that finds the pool full on a queue with no timer, and it waits forever. `max`
+defaults to 10, so ten slow queries at once are enough: every request after them — auth,
+billing, the workers, `/health` — hangs with no error, no log and no metric. That is not a 500,
+it is silence, which is why it survives in a codebase. Eleven backends were measured for this
+and one had it bounded. The default here is 10 seconds; pass
+`connectionTimeoutMillis: 0` to wait forever on purpose, which a batch job may want.
+
+**It makes the idle-error handler impossible to forget.** A `Pool` emits `error` when the server
+closes an idle client — a restart, a failover, a dropped tunnel. With no listener, Node turns
+that into an uncaught exception and a crash handler exits the process, so a connection nobody
+was using takes the API down. `onIdleError` is a required field, not an option.
+
+Readiness gets its own call, and it has a deadline:
+
+```ts
+const ok = await pingPool(pool, {
+  timeoutMs: 2_000,
+  onError: (e) => logger.warn("[pg] down", { e }),
+});
+```
+
+A raw `SELECT 1` hangs when the database hangs, which is the one thing a health check must not
+do: an orchestrator reads a timeout as "unknown" where it would read `false` as "replace this
+container". `connectionTimeoutMillis` does not cover it — that bounds getting a connection, not
+the query once you hold one.
+
+Two things stay yours. The pool **singleton** — a package that holds it decides when your process
+can exit. And the **`ssl` option**: `@gusnips/migrate` exports `pgSsl`, which infers it from the
+connection URL, so spread it in beside `connectionString`.
+
+`pg` is an optional peer, behind the `/pg` subpath, so importing `@gusnips/server` never
+installs it.
+
 ## What this package does not ship
 
 Each of these was measured, not assumed.

@@ -1,10 +1,10 @@
 {
   "name": "@gusnips/server",
-  "version": "0.3.1",
+  "version": "0.4.0",
   "description": "The layer under a TypeScript backend: one error shape, one response envelope, one retry rule, one logger.",
   "type": "module",
   "license": "MIT",
-  "author": "Gustavo Salomé",
+  "author": "Gustavo Salom\u00e9",
   "homepage": "https://github.com/gusnips/serverkit/tree/main/server#readme",
   "bugs": {
     "url": "https://github.com/gusnips/serverkit/issues"
@@ -21,6 +21,10 @@
     "./supabase": {
       "types": "./dist/supabase/index.d.ts",
       "default": "./dist/supabase/index.js"
+    },
+    "./pg": {
+      "types": "./dist/pg/index.d.ts",
+      "default": "./dist/pg/index.js"
     }
   },
   "types": "./dist/index.d.ts",
@@ -44,7 +48,8 @@
     "logging",
     "retry",
     "supabase",
-    "typescript"
+    "typescript",
+    "postgres"
   ],
   "scripts": {
     "build": "rm -rf dist && tsc -p tsconfig.build.json",
@@ -62,7 +67,8 @@
   "peerDependencies": {
     "@gusnips/http": ">=0.1 <1",
     "hono": ">=4.9.9 <5",
-    "@supabase/supabase-js": ">=2.91 <3"
+    "@supabase/supabase-js": ">=2.91 <3",
+    "pg": ">=8.13 <9"
   },
   "peerDependenciesMeta": {
     "hono": {
@@ -70,13 +76,18 @@
     },
     "@supabase/supabase-js": {
       "optional": true
+    },
+    "pg": {
+      "optional": true
     }
   },
   "devDependencies": {
     "@gusnips/http": ">=0.1 <1",
     "@supabase/supabase-js": "^2.113.0",
     "@types/node": "^24.12.0",
+    "@types/pg": "^8.15.0",
     "hono": "^4.10.6",
+    "pg": "^8.16.0",
     "typescript": "^5.9.3",
     "vitest": "^4.1.2",
     "zod": "^4.3.6"

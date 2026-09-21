@@ -20,6 +20,7 @@ import {
 } from "./hono/index.ts";
 import type { RequestVariables } from "./hono/index.ts";
 import { isAuthOutage } from "./supabase/index.ts";
+import { createPgPool, pingPool } from "./pg/index.ts";
 
 type ErrorCode =
   "VALIDATION_ERROR" | "UNAUTHORIZED" | "NOT_FOUND" | "RATE_LIMIT_EXCEEDED" | "INTERNAL_ERROR";
@@ -153,5 +154,25 @@ describe("README — Supabase Auth", () => {
     expect(isAuthOutage(new AuthRetryableFetchError("fetch failed", 0))).toBe(true);
     // And the 507 the README names as the hole the SDK's list leaves open.
     expect(isAuthOutage(new AuthApiError("proxy said 507", 507, undefined))).toBe(true);
+  });
+});
+
+describe("README — Postgres", () => {
+  it("bounds the wait and requires the handler, exactly as the section claims", () => {
+    const onIdleError = () => {};
+    const pool = createPgPool({ connectionString: "postgres://u@127.0.0.1:1/x", onIdleError });
+    // "The default here is 10 seconds".
+    expect(pool.options.connectionTimeoutMillis).toBe(10_000);
+    // "`onIdleError` is a required field, not an option" — the type says so, and the wiring is
+    // what makes the requirement worth anything.
+    expect(pool.listenerCount("error")).toBe(1);
+    // "pass `connectionTimeoutMillis: 0` to wait forever on purpose".
+    const queued = createPgPool({ connectionTimeoutMillis: 0, onIdleError });
+    expect(queued.options.connectionTimeoutMillis).toBe(0);
+  });
+
+  it("gives the readiness call the deadline the section promises", async () => {
+    const hung = { query: () => new Promise<never>(() => {}) };
+    await expect(pingPool(hung, { timeoutMs: 20 })).resolves.toBe(false);
   });
 });

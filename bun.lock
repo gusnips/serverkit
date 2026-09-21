@@ -33,12 +33,14 @@
     },
     "server": {
       "name": "@gusnips/server",
-      "version": "0.3.0",
+      "version": "0.3.1",
       "devDependencies": {
         "@gusnips/http": ">=0.1 <1",
         "@supabase/supabase-js": "^2.113.0",
         "@types/node": "^24.12.0",
+        "@types/pg": "^8.15.0",
         "hono": "^4.10.6",
+        "pg": "^8.16.0",
         "typescript": "^5.9.3",
         "vitest": "^4.1.2",
         "zod": "^4.3.6",
@@ -47,10 +49,12 @@
         "@gusnips/http": ">=0.1 <1",
         "@supabase/supabase-js": ">=2.91 <3",
         "hono": ">=4.9.9 <5",
+        "pg": ">=8.13 <9",
       },
       "optionalPeers": [
         "@supabase/supabase-js",
         "hono",
+        "pg",
       ],
     },
   },

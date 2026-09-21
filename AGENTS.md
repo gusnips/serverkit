@@ -8,9 +8,10 @@ Entry point for AI agents working on this repo.
   and gives a stock Postgres in CI the roles and `auth` tables a Supabase database starts with.
 - **`@gusnips/server`** is the answer edge: the error class, the wire envelope and its mask, the
   JSON logger, a `/hono` subpath with the middleware and the four success adapters, and a
-  `/supabase` subpath holding the one decision a backend makes about Supabase Auth's answers. One
-  required peer, `@gusnips/http`, and only its types, which erase; `hono` and
-  `@supabase/supabase-js` are optional and reachable only behind their subpaths.
+  `/supabase` subpath holding the one decision a backend makes about Supabase Auth's answers, and
+  a `/pg` subpath holding the two a backend makes when it creates a connection pool. One required
+  peer, `@gusnips/http`, and only its types, which erase; `hono`, `@supabase/supabase-js` and `pg`
+  are optional and reachable only behind their subpaths.
 
 MIT · open source · npm scope `@gusnips`
 
@@ -48,7 +49,8 @@ serverkit/
 │       ├── responses.ts  ← the envelope both ways: ok/created/paginated, and createErrorResponse
 │       ├── logger/       ← createLogger() and the serializer that decides what a log line keeps
 │       ├── hono/         ← the edge: errorBoundary, errorHandler, guards, and the four adapters
-│       └── supabase/     ← isAuthOutage(): did auth say no, or fail to answer?
+│       ├── supabase/     ← isAuthOutage(): did auth say no, or fail to answer?
+│       └── pg/           ← createPgPool(): the wait is bounded, the idle handler is required
 ├── scripts/
 │   └── check-release.ts  ← packs each package and checks what the registry would get
 └── AGENTS.md             ← this file
@@ -196,7 +198,7 @@ both Bun 1.3.8 and Node 22. It is the driver's, not the runner's, and `describeT
 brackets is still right for the guard. Someone on IPv6 loopback writes `localhost` or passes the
 host outside the URL.
 
-### …and nine for `@gusnips/server`
+### …and ten for `@gusnips/server`
 
 21. **A success builder returns an ANSWER, not a body — so on Hono, import the adapters.** `ok`,
     `created`, `paginated` and `noContent` in `responses.ts` answer `{ status, body }`, because the
@@ -322,12 +324,62 @@ host outside the URL.
     passes for a reason its comment gets wrong. That exact mistake already shipped in this fleet
     and had to be corrected.
 
+    **One shape it cannot catch, and the false is a decision.** auth-js raises `AuthUnknownError`
+    when the body does not parse as JSON AND the status is off the list, and that subclass never
+    fills the status — so a 507 from a proxy answering HTML is indistinguishable from a malformed
+    400 and both read as "not an outage". Widening on the class name was declined: it is raised at
+    ANY status, so it would call the malformed 400 an outage too, and a dead session that reads as
+    retryable is the same failure from the other side — nobody signed out, and nobody able to sign
+    in either. Neither direction is measured, so the narrow answer stays with the analysis beside
+    it. The property is also PRESENT and `undefined` rather than absent, because the base
+    `AuthError` defines it, which is worse: `"status" in error` answers true and tells you nothing.
+    That is why the helper narrows on `typeof === "number"`. The first draft of that test asserted
+    "no status at all" and went red — a claim written without measuring, caught by the assertion
+    written to pin it.
+
     Takes `unknown`, not `AuthError`: the fleet asks this from three shapes and only one is
     narrowed. The door holds `AuthError | null` straight off `getUser`; the `catch` around a user
     lookup holds whatever was thrown. The vendor's predicate is itself `(error: unknown)` and
     duck-types on `__isAuthError` plus `name`, so it answers false for `null`, a number, a string,
     a bare `{}` and an ordinary `Error` — measured, not assumed, and the duck-typing is also why
     it keeps working when two copies of the SDK are installed.
+
+30. **A pool with no `connectionTimeoutMillis` does not fail — it goes quiet.** `createPgPool`
+    lives behind `/pg` because it imports `pg`, which a Worker cannot run. Read in
+    `pg-pool@3.14.0` rather than inferred: with that option unset, a caller that finds the pool
+    full is pushed onto `_pendingQueue` **with no timer at all** and waits until a connection
+    frees. `max` defaults to 10, so ten slow queries at once are enough — auth, billing, the
+    workers and `/health` all hang, with no error, no log and no metric. It is not a 500, it is
+    silence, and silence is why it survives in a codebase.
+
+    **Measured 2026-09-21 across `origin/main`: one backend of eleven bounded it.** That one had
+    a feature holding a connection across an advisory lock, which turned the latent case live and
+    is the only reason anyone looked. The other ten are standing on it. So the default is the
+    export — a caller who writes nothing gets 10 seconds, and `connectionTimeoutMillis: 0` is
+    still available for a batch job that would rather queue than fail. Spelled out, it is a
+    decision; omitted, it is the shape of an accident.
+
+    **`onIdleError` is required by the type, not an option.** All eleven wrote that listener and
+    all eleven wrote a comment calling it mandatory, because a `Pool` with no `error` listener
+    turns a server closing an IDLE client into an uncaught exception, and a backend whose crash
+    handler exits is then killed by a connection nobody was using. Eleven correct copies plus one
+    comment each is exactly the case a required field closes for the twelfth.
+
+    **`pingPool` is bounded and the timer is cleared.** Four backends run `SELECT 1` raw, so a
+    hung database hangs `/health` — which an orchestrator reads as "unknown" where `false` would
+    have meant "replace this container"; `connectionTimeoutMillis` does not cover it, because that
+    bounds getting a connection and not the query once you hold one. The one bounded copy in the
+    fleet left its `setTimeout` uncleared, so a process probed every few seconds carried a live
+    timer per probe.
+
+    **What did NOT come across, and why.** The `ssl` rule: `@gusnips/migrate` already exports
+    `pgSsl`, and the nine hand-written copies were byte-identical in the body — only their
+    comments differed, and they differed about WHY Supabase cloud goes unverified. The pool
+    **singleton**: every copy wrapped one in a module-level `let`, and a package that holds it
+    decides when your process can exit. `connectWithRetry`: four copies, and its `maxAttempts =
+Infinity` default turns a typo'd `DATABASE_URL` into a boot that hangs instead of one that
+    fails. Type parsers: a global side effect on the `pg` module, and a product decision about
+    what a `numeric` column means.
 
 ## What the build measured
 
