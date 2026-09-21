@@ -1,6 +1,6 @@
 {
   "name": "@gusnips/server",
-  "version": "0.2.1",
+  "version": "0.3.0",
   "description": "The layer under a TypeScript backend: one error shape, one response envelope, one retry rule, one logger.",
   "type": "module",
   "license": "MIT",
@@ -17,6 +17,10 @@
     "./hono": {
       "types": "./dist/hono/index.d.ts",
       "default": "./dist/hono/index.js"
+    },
+    "./supabase": {
+      "types": "./dist/supabase/index.d.ts",
+      "default": "./dist/supabase/index.js"
     }
   },
   "types": "./dist/index.d.ts",
@@ -35,10 +39,11 @@
   },
   "keywords": [
     "backend",
-    "hono",
     "errors",
+    "hono",
     "logging",
     "retry",
+    "supabase",
     "typescript"
   ],
   "scripts": {
@@ -56,15 +61,20 @@
   },
   "peerDependencies": {
     "@gusnips/http": ">=0.1 <1",
-    "hono": ">=4.9.9 <5"
+    "hono": ">=4.9.9 <5",
+    "@supabase/supabase-js": ">=2.91 <3"
   },
   "peerDependenciesMeta": {
     "hono": {
+      "optional": true
+    },
+    "@supabase/supabase-js": {
       "optional": true
     }
   },
   "devDependencies": {
     "@gusnips/http": ">=0.1 <1",
+    "@supabase/supabase-js": "^2.113.0",
     "@types/node": "^24.12.0",
     "hono": "^4.10.6",
     "typescript": "^5.9.3",

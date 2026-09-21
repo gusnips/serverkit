@@ -4,6 +4,7 @@
  * A snippet nobody executes rots quietly, and this one is the first thing an adopter copies.
  * Every literal below is what the README prints beside the call.
  */
+import { AuthApiError, AuthRetryableFetchError } from "@supabase/supabase-js";
 import { describe, expect, it } from "vitest";
 import { Hono } from "hono";
 import { createAppError, createErrorResponse, createLogger, ok, paginated } from "./index.ts";
@@ -18,6 +19,7 @@ import {
   underAny,
 } from "./hono/index.ts";
 import type { RequestVariables } from "./hono/index.ts";
+import { isAuthOutage } from "./supabase/index.ts";
 
 type ErrorCode =
   "VALIDATION_ERROR" | "UNAUTHORIZED" | "NOT_FOUND" | "RATE_LIMIT_EXCEEDED" | "INTERNAL_ERROR";
@@ -141,5 +143,15 @@ describe("the README", () => {
     expect(() => assertEveryRouteGuarded(app, { isPublic: underAny(["/public"]) })).toThrow(
       /\/private\/thing/,
     );
+  });
+});
+
+describe("README — Supabase Auth", () => {
+  it("answers the two lines the README prints beside the call", () => {
+    // The README's own comment: true when auth failed to answer, false when it refused the token.
+    expect(isAuthOutage(new AuthApiError("invalid JWT", 401, "bad_jwt"))).toBe(false);
+    expect(isAuthOutage(new AuthRetryableFetchError("fetch failed", 0))).toBe(true);
+    // And the 507 the README names as the hole the SDK's list leaves open.
+    expect(isAuthOutage(new AuthApiError("proxy said 507", 507, undefined))).toBe(true);
   });
 });

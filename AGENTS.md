@@ -7,9 +7,10 @@ Entry point for AI agents working on this repo.
 - **`@gusnips/migrate`** applies plain `.sql` files, writes TypeScript types from the live schema,
   and gives a stock Postgres in CI the roles and `auth` tables a Supabase database starts with.
 - **`@gusnips/server`** is the answer edge: the error class, the wire envelope and its mask, the
-  JSON logger, and a `/hono` subpath with the middleware and the four success adapters. One
-  required peer, `@gusnips/http`, and only its types, which erase; `hono` is optional and
-  reachable only behind the subpath.
+  JSON logger, a `/hono` subpath with the middleware and the four success adapters, and a
+  `/supabase` subpath holding the one decision a backend makes about Supabase Auth's answers. One
+  required peer, `@gusnips/http`, and only its types, which erase; `hono` and
+  `@supabase/supabase-js` are optional and reachable only behind their subpaths.
 
 MIT · open source · npm scope `@gusnips`
 
@@ -41,12 +42,13 @@ serverkit/
 │   │   ├── bin/          ← one bin, gusnips-migrate, which dispatches its two commands
 │   │   └── test/         ← the throwaway-database helpers the tests share
 │   └── sql/              ← supabase-stand-in.sql, also exported for `psql -f`
-├── server/               ← @gusnips/server. hono is an optional peer, only behind /hono.
+├── server/               ← @gusnips/server. Each optional peer sits behind its own subpath.
 │   └── src/
 │       ├── errors.ts     ← AppError and createAppError(): your code→status map is the contract
 │       ├── responses.ts  ← the envelope both ways: ok/created/paginated, and createErrorResponse
 │       ├── logger/       ← createLogger() and the serializer that decides what a log line keeps
-│       └── hono/         ← the edge: errorBoundary, errorHandler, guards, and the four adapters
+│       ├── hono/         ← the edge: errorBoundary, errorHandler, guards, and the four adapters
+│       └── supabase/     ← isAuthOutage(): did auth say no, or fail to answer?
 ├── scripts/
 │   └── check-release.ts  ← packs each package and checks what the registry would get
 └── AGENTS.md             ← this file
@@ -194,7 +196,7 @@ both Bun 1.3.8 and Node 22. It is the driver's, not the runner's, and `describeT
 brackets is still right for the guard. Someone on IPv6 loopback writes `localhost` or passes the
 host outside the URL.
 
-### …and eight for `@gusnips/server`
+### …and nine for `@gusnips/server`
 
 21. **A success builder returns an ANSWER, not a body — so on Hono, import the adapters.** `ok`,
     `created`, `paginated` and `noContent` in `responses.ts` answer `{ status, body }`, because the
@@ -286,6 +288,46 @@ host outside the URL.
 
     One name, no rename across call sites, and no cast. An adopter whose codes are open needs none
     of it — which is why this is an adopter's line and not a change to the generics' defaults.
+
+29. **Only auth ANSWERING "no" ends a session, and the vendor's own predicate is not enough to
+    tell.** `isAuthOutage` lives behind `/supabase` because it imports `@supabase/supabase-js`.
+    Every browser client in this fleet reads a 401 as a dead session and signs the person out, so
+    a 401 has to mean Supabase looked at the token and refused it; answer an outage with one and a
+    single bad minute at auth signs out everybody who was signed in, while the refresh they are
+    all waiting on is still in flight.
+
+    The shape is `isAuthRetryableFetchError(error) || status >= 500`, and **the second clause is
+    the load-bearing one**. The usual argument for keeping it is drift — the vendor's list was
+    `[502, 503, 504]` at auth-js 2.91 and `[500-504, 520-530]` at 2.113.0 — and that argument
+    invites "then pin a recent version and drop the clause". The argument that survives: it is a
+    LIST, not a range, so it has holes at every version ever shipped. Nothing for 505 through 519,
+    nothing from 531 up. A 507 or a 599 out of a proxy in front of GoTrue arrives as a plain
+    `AuthApiError` and the vendor's predicate answers false for it, at every version.
+
+    **Twelve backends wrote this predicate before the package did, and all twelve are correct —
+    the export is for the comment, not the code.** Measured 2026-09-21 against `origin/main`, with
+    the predicate checked as CALLED at the door rather than merely defined. Ten of the twelve
+    carried a vendor-version sentence inline, and three of those had gone false by the time anyone
+    re-read them; one of the three carried no number at all, which is how it escaped a gate
+    written to catch the other two. Three lines of code deduplicated is a bad trade. A sentence
+    that has silently gone wrong three times, collapsed to one copy with a test that executes the
+    claim, is the whole point.
+
+    **That test asserts the claim, never the numbers.** It pins that a 507 is refused by the
+    vendor and caught by us, so it goes red the day the vendor switches to a range — which is the
+    day the comment needs rewriting. A version sentence nothing executes is exactly the failure
+    above. And it does not build an `AuthApiError` with a 502 on it to stand for "GoTrue answered
+    502": auth-js reads its own list in `lib/fetch.js` and hands you an `AuthRetryableFetchError`
+    for a LISTED status, so that shape is one the SDK never produces, and a test written that way
+    passes for a reason its comment gets wrong. That exact mistake already shipped in this fleet
+    and had to be corrected.
+
+    Takes `unknown`, not `AuthError`: the fleet asks this from three shapes and only one is
+    narrowed. The door holds `AuthError | null` straight off `getUser`; the `catch` around a user
+    lookup holds whatever was thrown. The vendor's predicate is itself `(error: unknown)` and
+    duck-types on `__isAuthError` plus `name`, so it answers false for `null`, a number, a string,
+    a bare `{}` and an ordinary `Error` — measured, not assumed, and the duck-typing is also why
+    it keeps working when two copies of the SDK are installed.
 
 ## What the build measured
 

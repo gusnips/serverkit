@@ -330,6 +330,46 @@ Pass the app's own public rule, never a second list kept for the test — an exe
 else reads is the next thing to drift. It also fails a guard that runs in front of nothing, and
 an app with no endpoints, so the check cannot pass by asking nothing.
 
+## Supabase Auth
+
+If your API verifies a Supabase token, it makes one decision every client depends on: did auth
+say **no**, or did auth **not answer**?
+
+```bash
+bun add @supabase/supabase-js
+```
+
+```ts
+import { isAuthOutage } from "@gusnips/server/supabase";
+
+isAuthOutage(error);
+// → true when auth failed to answer, false when it looked at the token and refused it
+```
+
+At the door:
+
+```ts
+const { data, error } = await supabase.auth.getUser(token);
+if (isAuthOutage(error)) throw errors.serviceUnavailable("Authentication service unreachable");
+if (error || !data.user) throw errors.invalidToken();
+```
+
+Only a refusal ends a session. Browser clients read a 401 as "your session is over" and sign the
+person out, so answering an outage with a 401 signs out everyone who made a request during it —
+while the refresh they are all waiting on is still in flight. A 503 is retried instead.
+
+It tests two things and both are needed. The SDK's own `isAuthRetryableFetchError` catches a
+fetch that never landed, plus the statuses on its `NETWORK_ERROR_CODES` list. That list is a
+list and not a range, so it has holes at every version ever shipped: nothing for 505 through
+519, nothing from 531 up. A 507 out of a proxy in front of GoTrue is auth failing to answer, and
+the SDK's predicate says false for it. The status check covers the holes.
+
+It takes `unknown`, so you can also ask it about whatever a `catch` around your own user lookup
+caught. A driver's `TypeError` is not an auth outage and answers false.
+
+`@supabase/supabase-js` is an optional peer, behind the `/supabase` subpath, so importing
+`@gusnips/server` never installs it.
+
 ## What this package does not ship
 
 Each of these was measured, not assumed.
