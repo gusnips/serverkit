@@ -1,6 +1,7 @@
 import {
   AuthApiError,
   AuthRetryableFetchError,
+  AuthUnknownError,
   isAuthRetryableFetchError,
 } from "@supabase/supabase-js";
 import { describe, expect, it } from "vitest";
@@ -47,6 +48,21 @@ describe("isAuthOutage", () => {
       expect(isAuthRetryableFetchError(new AuthApiError("x", status, undefined))).toBe(false);
       expect(isAuthOutage(new AuthApiError("x", status, undefined))).toBe(true);
     }
+  });
+
+  it("cannot see a status auth-js threw away, and the false is a decision, not an oversight", () => {
+    // When the body does not parse as JSON AND the status is not on the list, auth-js raises
+    // `AuthUnknownError`, which never fills the status. A 507 from a proxy answering HTML is
+    // therefore indistinguishable from a malformed 400, and both read as "not an outage".
+    // Widening on the class name was declined — see the comment on `isAuthOutage`.
+    const unparseable = new AuthUnknownError("Unexpected token <", new SyntaxError("bad json"));
+    // The property is PRESENT and undefined, because the base `AuthError` defines it. That is
+    // worse than absent — `"status" in error` answers true and tells you nothing — and it is why
+    // `statusOf` narrows on `typeof === "number"`. Written the other way round first, and this
+    // assertion is what caught it.
+    expect("status" in unparseable).toBe(true);
+    expect(Object.getOwnPropertyDescriptor(unparseable, "status")?.value).toBeUndefined();
+    expect(isAuthOutage(unparseable)).toBe(false);
   });
 
   it("takes unknown, because two of the three call sites hold something that is not an AuthError", () => {

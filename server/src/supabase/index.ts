@@ -45,6 +45,20 @@ function statusOf(error: unknown): number {
  * them, and one of the three carried no number at all, which is how it escaped a gate written to
  * catch the other two. This is the copy that gets to be wrong, because it is the only one.
  *
+ * **One shape this cannot catch, measured rather than reasoned about.** When the body does not
+ * parse as JSON AND the status is not on the list, auth-js raises `AuthUnknownError`, which
+ * carries the parse error and **a `status` property that is present and `undefined`** — the base
+ * `AuthError` defines the field, and this subclass never fills it (`lib/fetch.js` builds it,
+ * `lib/errors.js` defines it; checked at 2.114.0 and 2.116.0). Present-and-undefined is worse
+ * than absent: `"status" in error` answers true and tells you nothing, which is why `statusOf`
+ * above narrows on `typeof === "number"` instead. So a 507 from a proxy answering HTML is
+ * indistinguishable here from a malformed 400, and this answers false for both. Widening on the
+ * class name is tempting and was declined: `AuthUnknownError` is raised at ANY status, so it
+ * would call that malformed 400 an outage too — and a dead session that reads as retryable is
+ * the same failure from the other side, where nobody is signed out and nobody can sign in
+ * either. The test below pins the `false`, so choosing otherwise is something somebody does on
+ * purpose.
+ *
  * `unknown` rather than `AuthError`, because the fleet asks this from three shapes and only one
  * of them is narrowed: the door holds `AuthError | null` straight off `getUser`, and the `catch`
  * around the user lookup holds whatever was thrown. The vendor's own predicate is
