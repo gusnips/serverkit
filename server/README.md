@@ -279,7 +279,12 @@ app.delete("/users/:id", (c) => noContent(c)); // 204, no body, no content-type
 
 Three adopters wrote those four functions by hand before they were here, and one of the three
 got the unwrap wrong in production. `ok` takes an explicit status for the cases that are not
-200 — `ok(c, job, 202)` where the route accepted rather than answered.
+200 — `ok(c, job, 202)` where the route accepted rather than answered — and a fourth argument for
+a product's own meta, so a metered read answers `{ data, meta }` without leaving the adapter:
+
+```ts
+app.get("/lookup", (c) => ok(c, profile, 200, { creditsCharged: 1, cache: "hit" }));
+```
 
 **`errorBoundary` is not optional.** Hono hands `onError` only what is `instanceof Error`.
 Anything else is rethrown past every layer and escapes as an unhandled rejection: no answer, a

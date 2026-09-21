@@ -13,6 +13,7 @@ import {
   errorHandler,
   guard,
   notFoundHandler,
+  ok as okRoute,
   requestLogger,
   underAny,
 } from "./hono/index.ts";
@@ -46,6 +47,18 @@ const errorResponse = createErrorResponse<ErrorCode, MessageKey>({
 describe("the README", () => {
   it("prints what ok() returns", () => {
     expect(ok({ id: 1 })).toEqual({ status: 200, body: { data: { id: 1 } } });
+  });
+
+  it("answers the metered read the way the adapter snippet writes it", async () => {
+    const profile = { handle: "nasa" };
+    const app = new Hono().get("/lookup", (c) =>
+      okRoute(c, profile, 200, { creditsCharged: 1, cache: "hit" }),
+    );
+    const res = await app.request("/lookup");
+    expect(await res.json()).toEqual({
+      data: profile,
+      meta: { creditsCharged: 1, cache: "hit" },
+    });
   });
 
   it("prints what paginated() returns", () => {

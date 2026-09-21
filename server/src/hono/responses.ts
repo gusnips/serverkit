@@ -18,9 +18,27 @@ import type { Context } from "hono";
 import type { ContentfulStatusCode } from "hono/utils/http-status";
 import { ok as okBody, paginated as paginatedBody } from "../responses.ts";
 
-/** `return ok(c, user)` — or `ok(c, job, 202)` where the route accepted rather than answered. */
-export function ok<T>(c: Context, data: T, status: ContentfulStatusCode = 200) {
-  return c.json(okBody(data).body, status);
+/**
+ * `return ok(c, user)` — or `ok(c, job, 202)` where the route accepted rather than answered.
+ *
+ * The `meta` is the half this adapter shipped without, and leaving it out was not a smaller API:
+ * `okBody` takes one, so an adapter that does not is a WRAPPER THAT NARROWS WHAT IT WRAPS. The
+ * first adopter to hold a meta is a metered API whose every read answers `{ data, meta }` with
+ * what the call cost and whether it was served from cache — and with no slot for it here, that
+ * route goes back to `c.json(okBody(data, meta).body, status)`, the exact raw line this module
+ * exists to make unreachable. A wrapper you have to step around for the common case protects
+ * nobody.
+ *
+ * Generic in the meta, like `okBody`: a page's meta is `PaginationMeta`, and a product's is
+ * whatever that product measures. The package does not get to name it.
+ */
+export function ok<T, M = PaginationMeta>(
+  c: Context,
+  data: T,
+  status: ContentfulStatusCode = 200,
+  meta?: M,
+) {
+  return c.json(okBody(data, meta).body, status);
 }
 
 export function created<T>(c: Context, data: T) {
