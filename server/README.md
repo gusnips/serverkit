@@ -447,12 +447,21 @@ const redis = createRedis({
 });
 ```
 
-**It makes the error handler impossible to forget.** ioredis emits `error` on every failed
-connect, and an EventEmitter with no `error` listener throws. Through the `uncaughtException`
-handler most backends install for crash visibility, that is a process exit over a Redis blip the
-client would have reconnected from by itself. `onError` is a required field, not an option. Four
-backends were measured for this: all four wrote the listener, all four wrote a comment saying it
-is not optional, and the function around it was byte-identical in every one.
+**It makes the error handler impossible to forget.** Without one, a failed connect prints a bare
+stack to stderr through ioredis's own `console.error` and reaches the app's logger not at all — so
+the one signal that a dependency has stopped answering lands outside the place an operator is
+already looking. `onError` is a required field, not an option. Four backends were measured for
+this: all four wrote the listener, all four wrote a comment saying it is not optional, and the
+function around it was byte-identical in every one.
+
+**Their stated reason for it is wrong, which is worth knowing before you copy it again.** All four
+say an EventEmitter with no `error` listener throws, so a blip becomes a process exit through a
+crash handler. True of an EventEmitter, false of ioredis: `silentEmit` checks the listener count
+and, finding none, logs and returns without ever emitting. Measured on ioredis 5.10.1 under bun
+1.3.8 and node 22 — the process survives and `uncaughtException` never fires. `createPgPool`'s
+`onIdleError` is NOT the same case, checked the same way rather than assumed: `pg-pool` calls
+`pool.emit("error", err, client)` with no listener-count guard, so there the listener really is what
+stands between an idle-client error and a crash. One library's sentence was copied onto another.
 
 **It defaults `maxRetriesPerRequest` to `null`, and that is the opposite kind of default from
 `createPgPool`'s.** There the default makes an unbounded wait bounded; here it makes commands

@@ -442,10 +442,23 @@ Infinity` default turns a typo'd `DATABASE_URL` into a boot that hangs instead o
     command timeout was "removed to allow BullMQ operations to complete properly".
 
     The connection factory behind all of this was **byte-identical in four backends**, comment
-    included, and one of those comments says out loud that it was copied from a sibling repo. Its
-    `error` listener is required here for exactly the reason invariant 30's `onIdleError` is: an
-    EventEmitter with no `error` listener throws, and through a crash handler that is a process
-    exit over a blip the client reconnects from by itself.
+    included, and one of those comments says out loud that it was copied from a sibling repo —
+    including the half of it that is false. All four state that an EventEmitter with no `error`
+    listener throws, so a blip becomes a process exit through a crash handler. **Measured on
+    ioredis 5.10.1, the version the whole fleet runs, under bun 1.3.8 and node 22: the process
+    survives and `uncaughtException` never fires.** `silentEmit` in `Redis.js` checks
+    `this.listeners(eventName).length` and, finding none, calls `console.error("[ioredis]
+Unhandled error event:", ...)` and returns — it never emits, so Node's throw is unreachable by
+    construction.
+
+    `onError` stays required for the reason that survives: that `console.error` is a bare stack on
+    stderr, outside the logger the app ships every other failure through, and `silentEmit` drops
+    the event entirely once the client's status is `end`. **Invariant 30's `onIdleError` is not
+    the same case and must not be corrected with it** — checked the same way rather than assumed,
+    `pg-pool` calls `pool.emit("error", err, client)` with no listener-count guard anywhere, so
+    there the listener really is what stands between an idle-client error and a crash. Copying one
+    library's sentence onto another is the whole mechanism here, and four repos copying it is what
+    made it look measured. **A sentence four files agree on is still one observation.**
 
 ## What the build measured
 

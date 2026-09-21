@@ -14,8 +14,7 @@
  *
  * The connection factory this replaces was BYTE-IDENTICAL in the four backends it came from,
  * comment included — and one of those comments says, out loud, that it was copied from a sibling
- * repo. The `error` listener is required here for the same reason `onIdleError` is required on
- * `createPgPool`.
+ * repo. Including the part of the comment that was wrong: see `onError`.
  */
 import IORedis, { type RedisOptions } from "ioredis";
 
@@ -26,15 +25,27 @@ export interface CreateRedisOptions extends RedisOptions {
    */
   url?: string;
   /**
-   * Required, because an ioredis client with no `error` listener is a process that exits.
+   * Required, because without it a failed connect leaves the app's log silent and prints an
+   * unstructured stack to stderr instead.
    *
-   * ioredis emits `error` on every failed connect, and an EventEmitter with no `error` listener
-   * throws. Through the `uncaughtException` handler a backend installs for crash visibility,
-   * that is a process exit over a Redis blip — the client reconnects on its own, so logging is
-   * the entire correct response.
+   * **The reason four backends give for this is wrong, and it was measured rather than
+   * reasoned.** All four say an EventEmitter with no `error` listener throws, so a Redis blip
+   * becomes a process exit through the `uncaughtException` handler a backend installs for crash
+   * visibility. That rule is true of an EventEmitter and false of ioredis: `silentEmit` in
+   * `Redis.js` checks `this.listeners(eventName).length` and, finding none, calls
+   * `console.error("[ioredis] Unhandled error event:", ...)` and returns — it never emits, so
+   * Node's throw is unreachable. Measured on ioredis 5.10.1 (what the whole fleet runs) under
+   * both bun 1.3.8 and node 22: the process survives and `uncaughtException` never fires.
    *
-   * Four backends in this fleet wrote that listener, and all four wrote a comment saying it "is
-   * not optional". Expressing it as a required field is what makes the fifth unable to forget.
+   * It stays required for the reason that survives. That `console.error` is a bare stack on
+   * stderr, outside whatever logger the app ships its other failures through, and `silentEmit`
+   * drops the event entirely once the client's status is `end`. A dependency that has stopped
+   * answering should say so where an operator is already looking.
+   *
+   * Note the sibling rule is NOT wrong, and it was checked the same way rather than assumed:
+   * `pg-pool` calls `pool.emit("error", err, client)` with no listener-count guard anywhere, so
+   * `createPgPool`'s `onIdleError` really is standing between an idle-client error and a crash.
+   * Copying one library's sentence onto another is what produced the false half.
    */
   onError: (error: Error) => void;
 }

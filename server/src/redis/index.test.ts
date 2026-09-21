@@ -142,3 +142,31 @@ describe("assertRedisReachable's hint", () => {
     await expect(assertRedisReachable(down, { timeoutMs: 20 })).rejects.toThrow(/wrong\.$/);
   });
 });
+
+describe("what onError is actually for", () => {
+  // The four donors all say a missing `error` listener crashes the process. It does not, and
+  // this pins the vendor behaviour their sentence got wrong — because the doc on `onError` now
+  // makes a claim about ioredis's internals, and a claim nothing checks is one that rots.
+  //
+  // `silentEmit` looks at the listener count and, finding none, writes the error to
+  // `console.error` and returns WITHOUT emitting. So Node's unhandled-'error' throw is
+  // unreachable, and the real cost of forgetting the listener is that the only signal lands on
+  // stderr instead of in the app's logger. If ioredis ever drops that guard, this test fails and
+  // the reasoning in the doc has to change with it.
+  it("sends a listener-less client's error to console.error, not to a throw", async () => {
+    const spy = vi.spyOn(console, "error").mockImplementation(() => {});
+    // Port 1 refuses immediately; `retryStrategy: () => null` stops after the first failure, so
+    // this costs one connect attempt rather than a backoff loop.
+    const raw = new (await import("ioredis")).default("redis://127.0.0.1:1", {
+      lazyConnect: true,
+      retryStrategy: () => null,
+    });
+    await expect(raw.connect()).rejects.toThrow();
+    expect(spy).toHaveBeenCalledWith(
+      "[ioredis] Unhandled error event:",
+      expect.stringContaining("ECONNREFUSED"),
+    );
+    raw.disconnect();
+    spy.mockRestore();
+  });
+});
