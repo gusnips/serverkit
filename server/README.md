@@ -429,6 +429,68 @@ connection URL, so spread it in beside `connectionString`.
 `pg` is an optional peer, behind the `/pg` subpath, so importing `@gusnips/server` never
 installs it.
 
+## Redis
+
+If your API uses Redis — for BullMQ, for rate-limit windows, for a cache — the connection and
+the probe that reads it are one decision, because the first makes the second necessary.
+
+```bash
+bun add ioredis
+```
+
+```ts
+import { createRedis, pingRedis } from "@gusnips/server/redis";
+
+const redis = createRedis({
+  url: env.REDIS_URL,
+  onError: (error) => logger.error("[redis] connection error", { error }),
+});
+```
+
+**It makes the error handler impossible to forget.** ioredis emits `error` on every failed
+connect, and an EventEmitter with no `error` listener throws. Through the `uncaughtException`
+handler most backends install for crash visibility, that is a process exit over a Redis blip the
+client would have reconnected from by itself. `onError` is a required field, not an option. Four
+backends were measured for this: all four wrote the listener, all four wrote a comment saying it
+is not optional, and the function around it was byte-identical in every one.
+
+**It defaults `maxRetriesPerRequest` to `null`, and that is the opposite kind of default from
+`createPgPool`'s.** There the default makes an unbounded wait bounded; here it makes commands
+wait forever — because BullMQ requires it, since its blocking reads must never be cut short by a
+retry limit. So the default is right and it has a consequence worth saying once:
+
+**every read on this connection needs its own bound.** A `ping`, a cache lookup, a limiter
+check, a `queue.add()` — with Redis down, each waits rather than failing. Pass
+`maxRetriesPerRequest: 3` for a connection that serves ordinary commands instead of BullMQ's.
+
+Readiness is the worked example, and it has a deadline:
+
+```ts
+const ok = await pingRedis(redis, {
+  timeoutMs: 2_000,
+  onError: (e) => logger.warn("[redis] down", { e }),
+});
+```
+
+Four hand-written copies of that bound exist in this fleet and all four leak their timer — a
+pending 2-second timer per health check, in a process something probes every few seconds. This
+one clears it.
+
+A worker gets a boot gate, because a process whose queues can never connect must not sit there
+looking healthy — that looks exactly like an empty queue:
+
+```ts
+await assertRedisReachable(redis, { url: env.REDIS_URL, timeoutMs: 5_000 });
+```
+
+It takes the URL and parses it so the error can name the host. It never prints the password.
+
+The client **singleton** stays yours, for the same reason the pool's does: a package that holds
+it decides when your process can exit.
+
+`ioredis` is an optional peer, behind the `/redis` subpath, so importing `@gusnips/server` never
+installs it.
+
 ## What this package does not ship
 
 Each of these was measured, not assumed.

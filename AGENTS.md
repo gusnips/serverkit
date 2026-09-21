@@ -8,11 +8,12 @@ Entry point for AI agents working on this repo.
   and gives a stock Postgres in CI the roles and `auth` tables a Supabase database starts with.
 - **`@gusnips/server`** is the answer edge: the error class, the wire envelope and its mask, the
   JSON logger, a `/hono` subpath with the middleware and the four success adapters, and a
-  `/supabase` subpath holding the one decision a backend makes about Supabase Auth's answers, and
-  a `/pg` subpath holding the two a backend makes when it creates a connection pool. **No
-  required peer.** `@gusnips/http` is used for its types and nothing else, so it erases and is
-  optional; `hono`, `@supabase/supabase-js` and `pg` are optional and reachable only behind their
-  subpaths.
+  `/supabase` subpath holding the one decision a backend makes about Supabase Auth's answers, a
+  `/pg` subpath holding the two a backend makes when it creates a connection pool, and a `/redis`
+  subpath holding the connection every backend on this stack opens for BullMQ and the bounded
+  probes that make it safe to read from. **No required peer.** `@gusnips/http` is used for its
+  types and nothing else, so it erases and is optional; `hono`, `@supabase/supabase-js`, `pg` and
+  `ioredis` are optional and reachable only behind their subpaths.
 
 MIT · open source · npm scope `@gusnips`
 
@@ -199,7 +200,7 @@ both Bun 1.3.8 and Node 22. It is the driver's, not the runner's, and `describeT
 brackets is still right for the guard. Someone on IPv6 loopback writes `localhost` or passes the
 host outside the URL.
 
-### …and eleven for `@gusnips/server`
+### …and twelve for `@gusnips/server`
 
 21. **A success builder returns an ANSWER, not a body — so on Hono, import the adapters.** `ok`,
     `created`, `paginated` and `noContent` in `responses.ts` answer `{ status, body }`, because the
@@ -417,6 +418,34 @@ Infinity` default turns a typo'd `DATABASE_URL` into a boot that hangs instead o
     anyway is a required peer with its error moved somewhere worse. Here, a required peer nothing
     imports is an optional peer charging every adopter for a package it never loads. One test,
     the built import graph; opposite answers.
+
+32. **`maxRetriesPerRequest: null` is required by BullMQ, so every read on that connection must
+    carry its own bound.** It is the mirror image of invariant 30 and that is the whole point of
+    writing it beside it: there the DEFAULT is the silent unbounded wait and `createPgPool`'s job
+    is to replace it; here the unbounded wait is the CORRECT setting, because BullMQ's blocking
+    reads must never be cut short by a retry limit, and every copy in the fleet sets it
+    deliberately. What does not follow, and what nobody wrote down, is that the same connection
+    then serves the queues, the limiters, the cache and the health probe — so a `ping`, a cache
+    lookup or a `queue.add()` against a down Redis does not fail, it waits.
+
+    **Four backends bound their `PING` exactly right and are safe only because of it. All four
+    then leaked the timer** — `Promise.race` against a `setTimeout`, no `clearTimeout` anywhere —
+    which is a pending 2-second timer per health check in a process something probes every few
+    seconds. `pingRedis` clears it in a `finally`, the same as `pingPool`.
+
+    **And one backend shows what the unbounded half costs when nothing bounds it.** It enqueues
+    inbound webhooks on a connection like this with no bound on the enqueue, so during a Redis
+    outage every webhook holds its HTTP connection until the caller gives up — while its
+    `/health`, which probes Postgres only, stays green. Two separate faults: a health check that
+    cannot report the dependency, and a write with no deadline. Fixing the first does not fix the
+    second, and reading the config comment is what separates them — it says, out loud, that the
+    command timeout was "removed to allow BullMQ operations to complete properly".
+
+    The connection factory behind all of this was **byte-identical in four backends**, comment
+    included, and one of those comments says out loud that it was copied from a sibling repo. Its
+    `error` listener is required here for exactly the reason invariant 30's `onIdleError` is: an
+    EventEmitter with no `error` listener throws, and through a crash handler that is a process
+    exit over a blip the client reconnects from by itself.
 
 ## What the build measured
 

@@ -25,6 +25,10 @@
     "./pg": {
       "types": "./dist/pg/index.d.ts",
       "default": "./dist/pg/index.js"
+    },
+    "./redis": {
+      "types": "./dist/redis/index.d.ts",
+      "default": "./dist/redis/index.js"
     }
   },
   "types": "./dist/index.d.ts",
@@ -49,7 +53,8 @@
     "retry",
     "supabase",
     "typescript",
-    "postgres"
+    "postgres",
+    "redis"
   ],
   "scripts": {
     "build": "rm -rf dist && tsc -p tsconfig.build.json",
@@ -68,7 +73,8 @@
     "@gusnips/http": ">=0.1 <1",
     "hono": ">=4.9.9 <5",
     "@supabase/supabase-js": ">=2.91 <3",
-    "pg": ">=8.13 <9"
+    "pg": ">=8.13 <9",
+    "ioredis": ">=5.6 <6"
   },
   "peerDependenciesMeta": {
     "@gusnips/http": {
@@ -82,6 +88,9 @@
     },
     "pg": {
       "optional": true
+    },
+    "ioredis": {
+      "optional": true
     }
   },
   "devDependencies": {
@@ -90,6 +99,7 @@
     "@types/node": "^24.12.0",
     "@types/pg": "^8.15.0",
     "hono": "^4.10.6",
+    "ioredis": "^5.10.1",
     "pg": "^8.16.0",
     "typescript": "^5.9.3",
     "vitest": "^4.1.2",
