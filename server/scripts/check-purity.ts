@@ -19,13 +19,20 @@
  * "the sync `constructEvent()` throws before checking the signature". That one is checked by eye
  * at every extraction, and by the types.
  *
+ * The pattern matches `from "…"`, a dynamic `import("…")`, a `require("…")` — and a BARE
+ * `import "node:fs"`, which the first three spellings all miss because none of them has a
+ * `from`. That last alternation was added after a break-test meant to prove the guard covers a
+ * new directory passed instead: the test was invalid, and the invalid test was the only thing
+ * that found the hole. A guard is only evidence once you have watched it catch the thing it is
+ * for — including the spellings you did not think of.
+ *
  * Run: bun run purity
  */
 import { readdir, readFile } from "node:fs/promises";
 import { join, relative } from "node:path";
 
 const NODE_PATTERN =
-  /(?:from\s+['"]|import\s*\(\s*['"]|require\s*\(\s*['"])(?:node:)?(?:fs|path|os|child_process|crypto|net|http|https|stream|buffer|worker_threads|cluster|dns|tls|dgram|readline|vm|zlib|util|url|querystring|assert|events|process|perf_hooks|timers)(?:\/[^'"]*)?['"]|(?:^|[^.\w$])(?:process\.(?:env|on|exit|cwd|hrtime)|Buffer|__dirname|__filename)\b/;
+  /(?:from\s+['"]|import\s*\(\s*['"]|import\s+['"]|require\s*\(\s*['"])(?:node:)?(?:fs|path|os|child_process|crypto|net|http|https|stream|buffer|worker_threads|cluster|dns|tls|dgram|readline|vm|zlib|util|url|querystring|assert|events|process|perf_hooks|timers)(?:\/[^'"]*)?['"]|(?:^|[^.\w$])(?:process\.(?:env|on|exit|cwd|hrtime)|Buffer|__dirname|__filename)\b/;
 
 /** `src/node/` is the exception. Tests are skipped: they run under Node by definition. */
 const EXEMPT = /(?:^|\/)(?:node\/|__tests__\/|[^/]+\.test\.ts$)/;
