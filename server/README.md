@@ -8,8 +8,15 @@ queue consumer, and in an MCP tool handler.
 bun add @gusnips/server @gusnips/http
 ```
 
-`@gusnips/http` is a required peer: it declares the envelope, and your API and your browser
-client both import it, so there is one declaration of the wire contract and not two.
+`@gusnips/http` declares the envelope, and your API and your browser client both import it, so
+there is one declaration of the wire contract and not two. Install it whenever you answer a
+request. It is an optional peer rather than a required one because this package uses it for its
+types only, so its code never runs here — which means a server reaching only for a subpath like
+`@gusnips/server/pg` installs the one package it actually loads:
+
+```bash
+bun add @gusnips/server pg
+```
 
 ```ts
 import { ok } from "@gusnips/server";

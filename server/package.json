@@ -1,6 +1,6 @@
 {
   "name": "@gusnips/server",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "description": "The layer under a TypeScript backend: one error shape, one response envelope, one retry rule, one logger.",
   "type": "module",
   "license": "MIT",
@@ -71,6 +71,9 @@
     "pg": ">=8.13 <9"
   },
   "peerDependenciesMeta": {
+    "@gusnips/http": {
+      "optional": true
+    },
     "hono": {
       "optional": true
     },

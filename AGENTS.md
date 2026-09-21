@@ -9,9 +9,10 @@ Entry point for AI agents working on this repo.
 - **`@gusnips/server`** is the answer edge: the error class, the wire envelope and its mask, the
   JSON logger, a `/hono` subpath with the middleware and the four success adapters, and a
   `/supabase` subpath holding the one decision a backend makes about Supabase Auth's answers, and
-  a `/pg` subpath holding the two a backend makes when it creates a connection pool. One required
-  peer, `@gusnips/http`, and only its types, which erase; `hono`, `@supabase/supabase-js` and `pg`
-  are optional and reachable only behind their subpaths.
+  a `/pg` subpath holding the two a backend makes when it creates a connection pool. **No
+  required peer.** `@gusnips/http` is used for its types and nothing else, so it erases and is
+  optional; `hono`, `@supabase/supabase-js` and `pg` are optional and reachable only behind their
+  subpaths.
 
 MIT · open source · npm scope `@gusnips`
 
@@ -198,7 +199,7 @@ both Bun 1.3.8 and Node 22. It is the driver's, not the runner's, and `describeT
 brackets is still right for the guard. Someone on IPv6 loopback writes `localhost` or passes the
 host outside the URL.
 
-### …and ten for `@gusnips/server`
+### …and eleven for `@gusnips/server`
 
 21. **A success builder returns an ANSWER, not a body — so on Hono, import the adapters.** `ok`,
     `created`, `paginated` and `noContent` in `responses.ts` answer `{ status, body }`, because the
@@ -380,6 +381,34 @@ host outside the URL.
 Infinity` default turns a typo'd `DATABASE_URL` into a boot that hangs instead of one that
     fails. Type parsers: a global side effect on the `pg` module, and a product decision about
     what a `numeric` column means.
+
+31. **A peer used only for its types is optional, and a sentence saying so is not the
+    declaration.** `@gusnips/http` was a REQUIRED peer while being imported in exactly two files,
+    both `import type`. Verified the way frontkit's invariant 15 prescribes — against the BUILT
+    output, never the source: zero occurrences in any emitted `.js`, and only `.d.ts` references,
+    because types erase.
+
+    The cost lands on the adopter who wants the narrowest subpath. `/pg` is a pool factory that
+    imports `pg` and nothing else, and taking it meant installing a second package whose code can
+    never run. That is what found this: of the ten backends standing on invariant 30's silent
+    pool, four carry no `@gusnips/server` at all, so the one-line fix would have arrived as two
+    new dependencies.
+
+    **The tell was in our own preamble, one line above the word "required": "only its types,
+    which erase".** A document that states the reason a rule is unnecessary, beside the rule, is
+    the shape this invariant exists to catch — and it had been read past for four releases.
+
+    **The risk is `skipLibCheck`, and it is measured rather than assumed.** With the peer optional,
+    an adopter who uses the `"."` entry and does not install `@gusnips/http` has tsc resolve a
+    `.d.ts` reference to nothing. All four of those repos set `skipLibCheck: true` in the
+    `tsconfig.base.json` every other config extends, so nothing breaks for them; where it is off,
+    the error moves from install time to typecheck time, which is the direction invariant 15
+    warns about, and is why this paragraph exists instead of a shrug.
+
+    This is invariant 15 read from the other end. There, an optional peer the barrel imports
+    anyway is a required peer with its error moved somewhere worse. Here, a required peer nothing
+    imports is an optional peer charging every adopter for a package it never loads. One test,
+    the built import graph; opposite answers.
 
 ## What the build measured
 
