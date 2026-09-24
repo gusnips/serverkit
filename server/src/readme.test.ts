@@ -24,7 +24,9 @@ import {
   paginated,
   readBounded,
   safeEqual,
+  signToken,
   signWebhook,
+  verifyToken,
   verifyWebhook,
 } from "./index.ts";
 import {
@@ -342,5 +344,22 @@ describe("README — a secret you store", () => {
   it("refuses a key of the wrong length when the sealer is created", () => {
     const short = Buffer.alloc(16, 3).toString("base64");
     expect(() => createSealer({ current: "v1", keys: { v1: short } })).toThrow("must be 32 bytes");
+  });
+});
+
+describe("README — a link that proves who it is for", () => {
+  it("reads back what it signed, for the same purpose only", async () => {
+    const secret = "a-service-key-the-deployment-already-holds";
+    const token = await signToken({ secret, purpose: "unsubscribe:v1", payload: "user_42" });
+    expect(token).toMatch(/^dXNlcl80Mg\.[\w-]{43}$/);
+    expect(await verifyToken({ secret, purpose: "unsubscribe:v1", token })).toEqual({
+      ok: true,
+      payload: "user_42",
+      expiresAt: null,
+    });
+    expect(await verifyToken({ secret, purpose: "oauth-state:v1", token })).toEqual({
+      ok: false,
+      reason: "bad-signature",
+    });
   });
 });

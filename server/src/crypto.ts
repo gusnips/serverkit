@@ -46,6 +46,12 @@ export async function hmacSha256(
   message: string,
   encoding: "hex" | "base64",
 ): Promise<string> {
+  const mac = await hmacBytes(key, message);
+  return encoding === "hex" ? hexOf(mac) : base64Of(mac);
+}
+
+/** `hmacSha256` as raw bytes, for a MAC that becomes the next key. */
+export async function hmacBytes(key: string | Uint8Array, message: string): Promise<Uint8Array> {
   // A copy, because Web Crypto takes only a view over a plain ArrayBuffer.
   const raw = new Uint8Array(bytesOf(key));
   if (raw.length === 0) throw new TypeError("An HMAC key must not be empty");
@@ -56,8 +62,7 @@ export async function hmacSha256(
     false,
     ["sign"],
   );
-  const mac = new Uint8Array(await crypto.subtle.sign("HMAC", imported, encoder.encode(message)));
-  return encoding === "hex" ? hexOf(mac) : base64Of(mac);
+  return new Uint8Array(await crypto.subtle.sign("HMAC", imported, encoder.encode(message)));
 }
 
 function hexOf(bytes: Uint8Array): string {

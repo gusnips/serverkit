@@ -63,6 +63,7 @@ serverkit/
 │       ├── crypto.ts     ← safeEqual() and hmacSha256(), on Web Crypto so a Worker runs them
 │       ├── webhook.ts    ← sign and verify, in Stripe's one-header format and Standard Webhooks
 │       ├── seal.ts       ← createSealer(): AES-GCM for a secret you store, with a key id to rotate
+│       ├── token.ts      ← signToken() and verifyToken(): a link that proves who it is for
 │       └── node/         ← the one directory allowed Node: fetchPublic(), and scryptSealKey()
 ├── scripts/
 │   └── check-release.ts  ← packs each package and checks what the registry would get
@@ -211,7 +212,7 @@ both Bun 1.3.8 and Node 22. It is the driver's, not the runner's, and `describeT
 brackets is still right for the guard. Someone on IPv6 loopback writes `localhost` or passes the
 host outside the URL.
 
-### …and eighteen for `@gusnips/server`
+### …and nineteen for `@gusnips/server`
 
 21. **A success builder returns an ANSWER, not a body — so on Hono, import the adapters.** `ok`,
     `created`, `paginated` and `noContent` in `responses.ts` answer `{ status, body }`, because the
@@ -555,6 +556,20 @@ Unhandled error event:", ...)` and returns — it never emits, so Node's throw i
     sit in a `Map`, so a stored value naming its key `constructor` finds no key rather than
     Object's. `scryptSealKey` is the one piece in `/node`, because Web Crypto has no scrypt on Node
     or on Bun (measured).
+
+39. **A token the server hands out carries its purpose in the key, and says `expired` only of its
+    own signature.** Twelve copies from six derivations. Five backends derive the signing key as the
+    HMAC of a service key and a purpose label, so the service key never signs and two doors cannot
+    share a token; three other designs signed with an encryption key, and one with the service key
+    itself. The kit takes the first design, and without an expiry its token is byte-for-byte theirs,
+    because an unsubscribe link must keep working in mail already sent (tested against their
+    formula, both ways). An expiring token adds a signed middle segment, and since a payload holds
+    no dot, no token can be recut to drop or move its expiry. The signature is checked before the
+    expiry, so a "this link expired" page is only ever shown for a token the server signed. The
+    shape is checked first, so a token that passes is base64url, digits and dots, safe to write back
+    into a page. One design binds an outside value, a username, into its signature. Here that would
+    be a hole: MAC-ing `<payload>.<value>` lets a caller who picks the value move the expiry into it
+    and drop it. So the value goes in the payload and is compared after verifying.
 
 ## What the build measured
 

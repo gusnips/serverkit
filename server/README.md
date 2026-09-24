@@ -799,6 +799,34 @@ const vault = createSealer({
 });
 ```
 
+## A link that proves who it is for
+
+An unsubscribe link, an OAuth `state`, an approval link: your server writes a token, hands it to a
+person, and reads it back later with no session behind it. The signature proves you wrote it.
+
+```ts
+import { signToken, verifyToken } from "@gusnips/server";
+
+const token = await signToken({ secret, purpose: "unsubscribe:v1", payload: userId });
+// → "dXNlcl80Mg.Xq3…", safe in a URL
+
+const verdict = await verifyToken({ secret, purpose: "unsubscribe:v1", token });
+if (!verdict.ok) return c.html(linkNotValidPage); // one page for every reason
+verdict.payload; // userId
+```
+
+- **`purpose` is mixed into the key.** A token made for one purpose never verifies for another,
+  and the secret itself never signs, so a service key you already hold can be the secret.
+- **`ttlSecs` makes it expire.** Leave it out only for a link that must work forever, such as
+  unsubscribe: the button sits in old mail, and old mail is where people look for it.
+- **It is signed, not encrypted.** Anyone holding the token can read the payload. For structured
+  data, pass `JSON.stringify(data)`, and parse it after it verifies.
+- **`reason` is `malformed`, `bad-signature` or `expired`.** `expired` is only said of a token you
+  signed, so a page that says "this link expired, ask for a new one" is telling the truth.
+
+Without `ttlSecs`, a token is `<base64url(payload)>.<signature>`, keyed by the HMAC of the secret
+and the purpose. Links you signed that way by hand keep verifying after you switch.
+
 ## What this package does not ship
 
 Each of these was measured, not assumed.
