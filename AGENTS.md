@@ -881,12 +881,14 @@ the writer, and those came across with every copy's fixes merged.
     one file. A file that cannot be read for a reason other than not existing throws rather than
     reading as stale, because "stale" would send someone to regenerate over a permission error.
 
-    All 50 planted defects were caught, with a green control. Two backends' generators were
+    All 50 planted defects were caught, with a green control. All five donor generators were
     rewritten on the package and ran their own `--check` green, which means every generated file
-    came out byte for byte: 268 and 281 lines shorter. Each check was then shown failing on a file
-    with one line appended. zod converts through Standard JSON
-    Schema, as in `/openapi`, so zod is not a peer. Unlike `/openapi`, `unrepresentable: "any"`
-    is NOT passed: a type zod cannot describe must stop the generator, not become `{}`.
+    came out byte for byte, each generator 267 to 281 lines shorter (1,367 in all). Each check was
+    then shown failing on a file with one line appended. zod converts through Standard JSON Schema,
+    as in `/openapi`, so zod is not a peer. Unlike `/openapi`, `unrepresentable: "any"` is NOT
+    passed: a type zod cannot describe must stop the generator, not become `{}`. One donor did pass
+    it. None of its operations needed it, so its output did not change, and the day one does, its
+    generator now stops and names the type instead of publishing `unknown`.
 
 ## What the build measured
 

@@ -121,7 +121,7 @@ had fixed something the others had not, and every one still had these bugs:
 - `export interface Empty {}` on one line swallowed the declaration after it.
 - A comment written `/*/` ended on the character that opened it.
 
-This package is the merge, with each fix pinned by a test. Two of those generators were rewritten
-on it and wrote every file byte for byte as before, 268 and 281 lines shorter.
+This package is the merge, with each fix pinned by a test. All five generators were then rewritten
+on it and wrote every file byte for byte as before, each 267 to 281 lines shorter.
 
 MIT
