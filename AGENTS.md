@@ -57,6 +57,7 @@ serverkit/
 │       ├── pg/           ← createPgPool(): the wait is bounded, the idle handler is required
 │       ├── redis/        ← createRedis(), the bounded probes, and the rate-limit window store
 │       ├── bullmq/       ← queues that delete finished jobs, the dead letter, the schedule sync
+│       ├── mcp/          ← the MCP door: tools that never throw, a limit per call, POST only
 │       ├── rate-limit.ts ← hitWindow() and the memory store; rateLimit() is in hono/
 │       ├── client-ip.ts  ← clientIpOf() and ipSubject(): the socket first, a header only from the proxy
 │       ├── ip.ts         ← the IPv4 and IPv6 parsers url-guard and client-ip share; not exported
@@ -217,7 +218,7 @@ both Bun 1.3.8 and Node 22. It is the driver's, not the runner's, and `describeT
 brackets is still right for the guard. Someone on IPv6 loopback writes `localhost` or passes the
 host outside the URL.
 
-### …and twenty-four for `@gusnips/server`
+### …and twenty-five for `@gusnips/server`
 
 21. **A success builder returns an ANSWER, not a body — so on Hono, import the adapters.** `ok`,
     `created`, `paginated` and `noContent` in `responses.ts` answer `{ status, body }`, because the
@@ -689,6 +690,35 @@ Unhandled error event:", ...)` and returns — it never emits, so Node's throw i
     buffered, and the TLS handshake with two public providers on 587 buffered nothing. The IMAP
     smoke test that found it calls `unpipe()`, which pauses the socket. Anything here that drives a
     socket itself and pauses it is back under the bug.
+
+45. **An MCP tool never throws, a limit counts tool calls, and one guard covers both spellings of
+    the door.** Eight backends, eight doors, no file-level paste among them, and every fix lived in
+    one or two. The SDK (1.29.0 to 1.30.1) catches a handler's throw and answers `err.message` as
+    the tool's result, on a 200: three doors rethrew what they could not place, with a comment
+    saying the rethrow reached the log, so a driver's `ECONNREFUSED` with an internal address went
+    to the agent and no line was written. `registerOperation` answers every `kind` through
+    `errorResponse` and logs the raw error for `server` and `unexpected`, as REST does. One POST
+    may carry a JSON-RPC batch, and the stateless transport runs every call in it, concurrently,
+    under every protocol version, including those that dropped batching (measured with 50): six
+    doors limited the POST. So the limit is `beforeCall`, required, with `null` to decline, the
+    same shape as `whenStoreFails`. Handed a `.shape`, the SDK parses with a loose object and
+    strips an invented key before the handler's own `.strict()` can see it, so `inputSchema` is
+    `AnySchema` and a shape does not compile. A GET on the stateless transport answers a stream
+    nothing writes to, held until the idle timeout (180-255 s in the fleet), so it gets a 405.
+
+    **The spelling half is two Hono facts, and fixing the first creates the second.**
+    `app.route("/mcp", sub)` folds `""` and `"/"` into `/mcp`, so a sub-app serves one spelling:
+    five doors answered `/mcp/` with a 404 under a comment claiming both. And
+    `app.use("/mcp", guard)` matches `/mcp` exactly, so a door serving both behind that guard
+    serves `/mcp/` with no key. Measured on Hono 4.12.26 and 4.13.8: `"/mcp/*"` covers `/mcp`, `/mcp/` and `/mcp/x`. No
+    door had the second bug, because the two serving both spellings also guard `"/mcp/*"`. That is
+    why the README states the guard and the mount together, and a test pins both statuses.
+
+    `registerOperation` takes `ToolOperation<Deps, unknown, unknown>`, not a generic `Args`. A
+    catalog of different operations is a union, and inference over a union argument picks one
+    member and refuses the rest, which is exactly the loop four doors write. `run` is a method, so
+    it is compared both ways, and `{ id: string }` stands where `unknown` is asked for with no cast,
+    also from an app's own operation type whose `run` is a property (tested).
 
 ## What the build measured
 

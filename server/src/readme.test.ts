@@ -7,7 +7,10 @@
 import { createHmac } from "node:crypto";
 import { AuthApiError, AuthRetryableFetchError } from "@supabase/supabase-js";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { Hono } from "hono";
+import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { Hono, type Context } from "hono";
+import { createMiddleware } from "hono/factory";
+import { z } from "zod";
 import {
   checkUrlShape,
   clientIpOf,
@@ -45,6 +48,7 @@ import {
   underAny,
 } from "./hono/index.ts";
 import type { RequestVariables } from "./hono/index.ts";
+import { mcpRoutes, registerOperation, type ToolOperation } from "./mcp/index.ts";
 import { isAuthOutage } from "./supabase/index.ts";
 import { createPgPool, pingPool } from "./pg/index.ts";
 import { createRedis, redisWindowStore } from "./redis/index.ts";
@@ -370,6 +374,99 @@ describe("README — a link that proves who it is for", () => {
       ok: false,
       reason: "bad-signature",
     });
+  });
+});
+
+describe("README — an MCP door", () => {
+  it("answers every operation, counts each call in a batch, and guards both spellings", async () => {
+    type AppEnv = { Variables: { userId: string; requestId: string } };
+    type Deps = { userId: string };
+    const getPlace: ToolOperation<Deps, { id: string }, { id: string; owner: string }> = {
+      name: "get_place",
+      description: "Reads one place by its id.",
+      inputSchema: z.object({ id: z.string() }).strict(),
+      annotations: { readOnlyHint: true },
+      run: async (deps, args) => ({ id: args.id, owner: deps.userId }),
+    };
+    const findPlaces: ToolOperation<Deps, { q: string }, string[]> = {
+      name: "find_places",
+      description: "Finds places by name.",
+      inputSchema: z.object({ q: z.string() }).strict(),
+      run: async (_deps, args) => [args.q],
+    };
+    const OPERATIONS = [getPlace, findPlaces];
+    const logger = createLogger();
+    const requireApiKey = createMiddleware<AppEnv>(async (c, next) => {
+      if (c.req.header("authorization") !== "Bearer key_1") return c.json({ error: "no key" }, 401);
+      c.set("userId", "u_1");
+      c.set("requestId", "req_1");
+      return next();
+    });
+    const app = new Hono<AppEnv>();
+
+    // The README, from here.
+    const toolCalls = memoryWindowStore();
+
+    function buildMcpServer(c: Context<AppEnv>) {
+      const server = new McpServer({ name: "acme", version: "1.0.0" });
+      const userId = c.get("userId");
+      for (const op of OPERATIONS)
+        registerOperation(server, op, {
+          errorResponse,
+          logger,
+          requestId: c.get("requestId"),
+          deps: () => ({ userId }),
+          // Once per tool call. One POST can carry many.
+          beforeCall: async () => {
+            const hit = await hitWindow(toolCalls, userId, { limit: 60, windowMs: 60_000 });
+            if (hit.outcome === "limited" || hit.outcome === "shed")
+              throw errors.rateLimit(hit.retryAfterSecs);
+          },
+        });
+      return server;
+    }
+
+    app.use("/mcp/*", requireApiKey);
+    app.route("/", mcpRoutes("/mcp", buildMcpServer, { allowedOrigins: new Set() }));
+    // To here.
+
+    const post = (path: string, body: unknown, key = "key_1") =>
+      app.request(path, {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${key}`,
+          "content-type": "application/json",
+          accept: "application/json, text/event-stream",
+        },
+        body: JSON.stringify(body),
+      });
+    const call = (id: number, name: string, args: unknown) => ({
+      jsonrpc: "2.0",
+      id,
+      method: "tools/call",
+      params: { name, arguments: args },
+    });
+
+    const one = await post("/mcp/", call(1, "find_places", { q: "park" }));
+    expect(await one.json()).toMatchObject({
+      result: { content: [{ type: "text", text: '{"data":["park"]}' }] },
+    });
+
+    const batch = await post(
+      "/mcp",
+      Array.from({ length: 60 }, (_, i) => call(i + 2, "get_place", { id: `p_${i}` })),
+    );
+    const answers = (await batch.json()) as {
+      result: { isError?: boolean; content: { text: string }[] };
+    }[];
+    const refused = answers.filter((a) => a.result.isError);
+    expect(refused).toHaveLength(1);
+    expect(JSON.parse(refused[0]!.result.content[0]!.text)).toMatchObject({
+      error: { code: "RATE_LIMIT_EXCEEDED", details: { retryAfterSecs: expect.any(Number) } },
+    });
+
+    for (const path of ["/mcp", "/mcp/"])
+      expect((await post(path, call(99, "find_places", { q: "x" }), "wrong")).status).toBe(401);
   });
 });
 

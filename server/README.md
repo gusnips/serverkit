@@ -946,6 +946,80 @@ verdict.payload; // userId
 Without `ttlSecs`, a token is `<base64url(payload)>.<signature>`, keyed by the HMAC of the secret
 and the purpose. Links you signed that way by hand keep verifying after you switch.
 
+## An MCP door
+
+Serve your API's operations to AI agents over MCP, the protocol agents use to call tools, with the
+same errors and limits as your REST routes.
+
+```bash
+bun add @modelcontextprotocol/sdk
+```
+
+```ts
+import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { hitWindow, memoryWindowStore } from "@gusnips/server";
+import { mcpRoutes, registerOperation } from "@gusnips/server/mcp";
+
+const toolCalls = memoryWindowStore();
+
+function buildMcpServer(c: Context<AppEnv>) {
+  const server = new McpServer({ name: "acme", version: "1.0.0" });
+  const userId = c.get("userId");
+  for (const op of OPERATIONS)
+    registerOperation(server, op, {
+      errorResponse,
+      logger,
+      requestId: c.get("requestId"),
+      deps: () => ({ userId }),
+      // Once per tool call. One POST can carry many.
+      beforeCall: async () => {
+        const hit = await hitWindow(toolCalls, userId, { limit: 60, windowMs: 60_000 });
+        if (hit.outcome === "limited" || hit.outcome === "shed")
+          throw errors.rateLimit(hit.retryAfterSecs);
+      },
+    });
+  return server;
+}
+
+app.use("/mcp/*", requireApiKey);
+app.route("/", mcpRoutes("/mcp", buildMcpServer, { allowedOrigins: new Set() }));
+```
+
+An operation is `{ name, description, inputSchema, run(deps, args) }`, plus an optional `title`
+and `annotations`. If your REST routes already run operations of that shape, the same list serves
+both doors.
+
+- **A tool call answers what the REST route answers.** A success is `{ data }`, as one text block.
+  A failure is the same `{ error }` body your `errorResponse` gives REST, marked `isError`. Pass
+  `present` to answer a success differently, for example with an image first.
+- **A tool handler never throws.** The MCP SDK answers a throw with the error's own message, so
+  `connect ECONNREFUSED 10.0.0.5:5432` reaches the agent and no log line sees it. Three of eight
+  backends shipped that. `registerOperation` catches every failure: a 5xx and an unexpected throw
+  are logged with the raw error, and an unexpected throw is masked, as on REST. `onUnexpected` is
+  where an alert goes. If you register a tool yourself, return `toolError(err, name, door)` from its
+  `catch`.
+- **Your limit goes in `beforeCall`, not on the route.** One POST can carry a batch of tool calls,
+  and the SDK runs every one of them. A limit on the route counts the POST, so 50 calls cost one.
+  `beforeCall` runs before each call. Throw your 429 there and only that call is refused. It is
+  required, so a door with no limit says `null`.
+- **Pass the zod object, made `.strict()`, not its `.shape`.** Given a shape, the SDK builds a loose
+  object and quietly drops an argument the agent made up. Given the strict object, it refuses the
+  call and names the key. A `.shape` does not compile here.
+- **Only POST is served.** This door keeps no sessions. A GET gets a 405 instead of an event stream
+  that nothing writes to and that stays open until the server's idle timeout.
+- **A web page must be on `allowedOrigins`.** The MCP spec asks servers to check `Origin`. A request
+  with no `Origin`, from an agent or a script, always goes through. An empty set refuses every web
+  page.
+- `build` runs once per request, and the server it returns is closed after the answer.
+
+**Guard `"/mcp/*"`, not `"/mcp"`.** The door answers `/mcp` and `/mcp/`. In Hono, `"/mcp"` guards
+only the first, so `/mcp/` would skip your API key check. `"/mcp/*"` guards both. Mount the door
+with `app.route("/", …)`, as above: mounted at `/mcp`, Hono serves only one of the two. Five of
+eight backends said in a comment that they served both, and answered `/mcp/` with a 404.
+
+We tested the SDK at 1.29.0 and 1.30.1, and Hono at 4.12.26 and 4.13.8. `@modelcontextprotocol/sdk`
+is an optional peer, behind the `/mcp` subpath, and the subpath imports nothing from Node.
+
 ## Sending mail
 
 ```bash
@@ -1129,6 +1203,7 @@ Each of these was measured, not assumed.
 - A cron schedule without a time zone does not compile.
 - A mail without a text part is refused.
 - A mail login is never sent over a connection without TLS.
+- An MCP tool handler never throws, and a tool's `.shape` does not compile.
 
 ## Develop
 
