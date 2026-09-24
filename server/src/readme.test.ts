@@ -16,6 +16,7 @@ import {
   hitWindow,
   hmacSha256,
   ipSubject,
+  listUnsubscribeHeaders,
   createErrorResponse,
   createLogger,
   memoryWindowStore,
@@ -368,6 +369,16 @@ describe("README — a link that proves who it is for", () => {
     expect(await verifyToken({ secret, purpose: "oauth-state:v1", token })).toEqual({
       ok: false,
       reason: "bad-signature",
+    });
+  });
+});
+
+describe("README — the unsubscribe headers", () => {
+  it("writes the link and the one-click pair", async () => {
+    const token = await signToken({ secret: "k", purpose: "unsubscribe:v1", payload: "user_42" });
+    expect(listUnsubscribeHeaders(`https://acme.test/unsubscribe?token=${token}`)).toEqual({
+      "List-Unsubscribe": `<https://acme.test/unsubscribe?token=${token}>`,
+      "List-Unsubscribe-Post": "List-Unsubscribe=One-Click",
     });
   });
 });

@@ -65,8 +65,10 @@ serverkit/
 │       ├── webhook.ts    ← sign and verify, in Stripe's one-header format and Standard Webhooks
 │       ├── seal.ts       ← createSealer(): AES-GCM for a secret you store, with a key id to rotate
 │       ├── token.ts      ← signToken() and verifyToken(): a link that proves who it is for
+│       ├── unsubscribe.ts← listUnsubscribeHeaders(): both one-click headers, for any sender
 │       ├── env.ts        ← validateEnv(): every problem with the environment, in one error
 │       ├── node/         ← the one directory allowed Node: fetchPublic(), scryptSealKey() and the drain
+│       │   └── mail/     ← createMailer(), the /mail subpath: SMTP needs a socket a Worker lacks
 │       └── __tests__/    ← the throwaway redis-server the Redis and BullMQ suites share
 ├── scripts/
 │   └── check-release.ts  ← packs each package and checks what the registry would get
@@ -215,7 +217,7 @@ both Bun 1.3.8 and Node 22. It is the driver's, not the runner's, and `describeT
 brackets is still right for the guard. Someone on IPv6 loopback writes `localhost` or passes the
 host outside the URL.
 
-### …and twenty-three for `@gusnips/server`
+### …and twenty-four for `@gusnips/server`
 
 21. **A success builder returns an ANSWER, not a body — so on Hono, import the adapters.** `ok`,
     `created`, `paginated` and `noContent` in `responses.ts` answer `{ status, body }`, because the
@@ -663,6 +665,30 @@ Unhandled error event:", ...)` and returns — it never emits, so Node's throw i
     two. The defect that put the donors' id back survived the suite, and that is the only reason the
     claim never reached a commit. The record here still takes the id BullMQ gives it, for a smaller
     reason: a job id that fails for good twice is recorded twice.
+
+44. **A login never crosses in clear, and every wait on a mail server has a deadline.** Nine
+    senders, seven of them pastes of one file. nodemailer upgrades port 587 to TLS only when the
+    server's reply to EHLO offers STARTTLS, so somebody on the path who deletes that word gets the
+    password: measured against a server with STARTTLS hidden, the login crossed as plain text on
+    nodemailer 6.10.1, 7.0.13 and 10.0.10, on Node 22, Bun 1.3.8 and Bun 1.4.2, and `requireTLS`
+    stopped it on all nine. One product sets it, in the lanes that dial its customers' mailboxes;
+    no system-mail sender does.
+    So a login sets `requireTLS`, and no login (a local catcher) does not, which is the only case
+    that needs plain text. 12 of 13 senders set no timeout, so nodemailer's 2 minutes to connect
+    and 10 minutes of silence applied inside requests somebody was waiting on; one number now
+    bounds each wait, and the `ponytail:` in the file names what it does not bound. The text part
+    is required because one sender sent HTML only. The one-click header pair is a pure function at
+    the root, tested on the bytes that went out, because two senders passed nodemailer's `comment`
+    form and tested the options object, which put the second header inside the first.
+
+    **Port 587 is safe on Bun, and the reason is narrower than "Bun is fine".** Bun #32239 keeps a
+    copy of the ciphertext on the plain socket after a STARTTLS upgrade, and a sibling project moved
+    a whole IMAP worker to Node over it. Measured: the copy appears only while the plain socket is
+    paused (43 bytes on Bun 1.3.8 and 1.4.2 when the probe paused it, 0 on Node), and nodemailer
+    leaves it flowing, so five sends each on both Bun versions went out intact with nothing
+    buffered, and the TLS handshake with two public providers on 587 buffered nothing. The IMAP
+    smoke test that found it calls `unpipe()`, which pauses the socket. Anything here that drives a
+    socket itself and pauses it is back under the bug.
 
 ## What the build measured
 

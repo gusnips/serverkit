@@ -946,6 +946,78 @@ verdict.payload; // userId
 Without `ttlSecs`, a token is `<base64url(payload)>.<signature>`, keyed by the HMAC of the secret
 and the purpose. Links you signed that way by hand keep verifying after you switch.
 
+## Sending mail
+
+```bash
+bun add nodemailer
+```
+
+```ts
+import { createMailer } from "@gusnips/server/mail";
+
+const mailer = createMailer({
+  host: env.SMTP_HOST,
+  user: env.SMTP_USER,
+  pass: env.SMTP_PASS,
+  from: { name: "Acme", address: "no-reply@acme.test" },
+  whenDisabled: () => errors.serviceUnavailable("Mail is not set up on this server"),
+});
+
+await mailer.send({ to: user.email, subject: "Your code", text: `Your code is ${code}.` });
+```
+
+- **With no `host`, mail is off.** `mailer.enabled` is false, and `send` throws the error
+  `whenDisabled` returns. A server without mail still starts, and a send says why it failed. Check
+  `enabled` first where you would rather skip the send.
+- **Each wait is 15 seconds at most**: finding the server, connecting, its first reply, and any
+  silence after that. nodemailer's own limits are 2 minutes to connect and 10 minutes of silence,
+  and 12 of 13 backends kept them, some inside a request somebody was waiting on. Change it with
+  `timeoutMs`. A server that keeps answering, slowly, can still hold one send for longer.
+- **With a login, TLS is required.** Port 587 starts in plain text and switches to TLS only when
+  the server offers it. If somebody on the network removes that offer, nodemailer sends your
+  password in plain text. We saw it happen on nodemailer 6, 7 and 10, on Node and on Bun. Without
+  a login, as with a local mail catcher such as Mailpit, plain text is allowed.
+- **Port 465 is TLS from the first byte.** nodemailer picks that from the port, so there is no
+  `secure` option to get wrong.
+- **`text` is required**, even when you send `html`. Spam filters mark down mail without it.
+- **`unsubscribeUrl`** writes both unsubscribe headers (below).
+- `send` returns the `messageId`, and the addresses the server `rejected` while it took the others.
+  It throws when the server refuses the whole message.
+
+Port 587 works on Bun. After STARTTLS, Bun can keep a copy of the encrypted bytes on the plain
+socket (Bun #32239), but only while that socket is paused, and nodemailer never pauses it. We
+tested Bun 1.3.8 and 1.4.2.
+
+`nodemailer` is an optional peer, behind the `/mail` subpath.
+
+### The unsubscribe headers
+
+```ts
+import { listUnsubscribeHeaders } from "@gusnips/server";
+
+listUnsubscribeHeaders(`https://acme.test/unsubscribe?token=${token}`);
+// → {
+//     "List-Unsubscribe": "<https://acme.test/unsubscribe?token=…>",
+//     "List-Unsubscribe-Post": "List-Unsubscribe=One-Click",
+//   }
+```
+
+Together, the two headers turn on the mail app's own unsubscribe button, and Gmail and Yahoo ask
+bulk senders for both. nodemailer's `list.unsubscribe` option writes only the first, and its
+`comment` form puts the second one inside the first. The second header is written only for an
+https link, because the mail provider sends a POST to it. A `mailto:` link is refused. The function
+has no dependencies and runs in a Worker too, so its result also fits Resend's `headers`. Make the
+token with `signToken`, above.
+
+Your unsubscribe route stays yours. Three rules for it:
+
+- **A GET never unsubscribes anyone.** Mail scanners open every link in a message. Show a page
+  with a button, and unsubscribe on the POST.
+- **The POST is the one-click button.** The mail provider sends `List-Unsubscribe=One-Click` to the
+  same URL, with no cookie. Unsubscribe, and answer 200.
+- **A failure on your side is not a bad link.** When your database or auth is down, answer 503 and
+  let the person try again. Telling them the link is invalid loses the unsubscribe.
+
 ## The environment
 
 Check the environment first thing at boot. A box with a wrong `.env` then stops with a list of
@@ -1055,6 +1127,8 @@ Each of these was measured, not assumed.
 - A secret still set to its `.env.example` placeholder stops the boot.
 - A drain that hangs exits 1, never 0.
 - A cron schedule without a time zone does not compile.
+- A mail without a text part is refused.
+- A mail login is never sent over a connection without TLS.
 
 ## Develop
 
