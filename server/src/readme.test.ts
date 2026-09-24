@@ -4,6 +4,7 @@
  * A snippet nobody executes rots quietly, and this one is the first thing an adopter copies.
  * Every literal below is what the README prints beside the call.
  */
+import { createHmac } from "node:crypto";
 import { AuthApiError, AuthRetryableFetchError } from "@supabase/supabase-js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { Hono } from "hono";
@@ -12,6 +13,7 @@ import {
   clientIpOf,
   createAppError,
   hitWindow,
+  hmacSha256,
   ipSubject,
   createErrorResponse,
   createLogger,
@@ -20,6 +22,9 @@ import {
   ok,
   paginated,
   readBounded,
+  safeEqual,
+  signWebhook,
+  verifyWebhook,
 } from "./index.ts";
 import {
   assertEveryRouteGuarded,
@@ -294,5 +299,30 @@ describe("README — the client's address", () => {
   it("counts an IPv6 customer by its /56, and lets null through as null", () => {
     expect(ipSubject("2001:db8:1234:56ff::1")).toBe("2001:db8:1234:5600::/56");
     expect(ipSubject(null)).toBeNull();
+  });
+});
+
+describe("README — a webhook", () => {
+  it("signs one header, and checks it against the raw body", async () => {
+    const secret = "whsec_c2VjcmV0";
+    const body = '{"type":"job.completed"}';
+    const signature = await signWebhook({ secret, body, now: 1_700_000_000_000 });
+    expect(signature).toMatch(/^t=1700000000,v1=[0-9a-f]{64}$/);
+    const check = (header: string, text = body) =>
+      verifyWebhook({ secrets: [secret], header, body: text, now: 1_700_000_000_000 });
+    expect(await check(signature)).toEqual({ ok: true });
+    expect(await check(signature, JSON.stringify(JSON.parse(body), null, 2))).toEqual({
+      ok: false,
+      reason: "bad-signature",
+    });
+  });
+
+  it("checks GitHub's format in one line, and an unset secret matches nothing", async () => {
+    const body = '{"zen":"Keep it logically awesome."}';
+    const header = `sha256=${createHmac("sha256", "gh-secret").update(body).digest("hex")}`;
+    const expected = `sha256=${await hmacSha256("gh-secret", body, "hex")}`;
+    expect(safeEqual(header, expected)).toBe(true);
+    expect(safeEqual("", "")).toBe(false);
+    await expect(hmacSha256("", body, "hex")).rejects.toThrow();
   });
 });

@@ -713,6 +713,56 @@ Check once when the URL is saved, with `resolvePublic`, so a bad one gets a 400 
 `Host` header rather than the name it is given, so an https URL on a port other than 443 fails.
 It also sends a request a second time on its own when a reused connection is reset.
 
+## A webhook
+
+A webhook URL is public, so anyone can POST to it. The signature is how the receiver tells your
+delivery from a forgery.
+
+```ts
+import { signWebhook } from "@gusnips/server";
+
+const signature = await signWebhook({ secret: endpoint.secret, body });
+// → "t=1700000000,v1=5f1c…", sent as your own header, such as x-acme-signature
+```
+
+Receiving one:
+
+```ts
+import { verifyWebhook } from "@gusnips/server";
+
+const verdict = await verifyWebhook({
+  secrets: [env.WEBHOOK_SECRET],
+  header: c.req.header("x-acme-signature"),
+  body: await c.req.text(),
+});
+if (!verdict.ok) throw errors.badSignature(); // log verdict.reason; do not send it back
+```
+
+- **Two formats.** `signWebhook` and `verifyWebhook` use one header, the format Stripe uses.
+  `signStandardWebhook` and `verifyStandardWebhook` use Standard Webhooks: three headers, the
+  format Supabase Auth's hooks send.
+- **A delivery signed more than five minutes ago is refused**, however well signed, so a captured
+  one cannot be sent again. `toleranceSecs` changes the limit. Sign each attempt, not each event,
+  or a retry arrives already too old.
+- **`secrets` is a list**, so a rotation is `[env.SECRET, env.OLD_SECRET]`. An unset one is
+  skipped. When none is set, the answer is `no-secret`, never a pass.
+- **`body` is the raw text.** Parse it after it passes: JSON parsed and written out again is a
+  different string, and its signature never matches.
+- **Every `v1` signature in the header is tried.** Supabase Auth sends one per secret it holds,
+  joined by `", "`.
+
+`newWebhookSecret()` makes a secret both formats accept: `whsec_` and 24 random bytes.
+
+Another vendor's format is one line on the same two functions. GitHub's:
+
+```ts
+const expected = `sha256=${await hmacSha256(env.GITHUB_WEBHOOK_SECRET, body, "hex")}`;
+if (!safeEqual(c.req.header("x-hub-signature-256") ?? "", expected)) throw errors.badSignature();
+```
+
+`hmacSha256` throws on an empty key and `safeEqual` answers `false` when either side is empty, so
+an unset secret cannot let a request through.
+
 ## What this package does not ship
 
 Each of these was measured, not assumed.
@@ -737,6 +787,7 @@ Each of these was measured, not assumed.
 - A 429 raised with no wait does not compile.
 - A code→status map that is not `as const` is refused.
 - A code outside your map, or a message key outside your union, does not compile.
+- A webhook checked while no secret is set is refused, never passed.
 
 ## Develop
 

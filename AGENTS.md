@@ -60,6 +60,8 @@ serverkit/
 │       ├── client-ip.ts  ← clientIpOf() and ipSubject(): the socket first, a header only from the proxy
 │       ├── ip.ts         ← the IPv4 and IPv6 parsers url-guard and client-ip share; not exported
 │       ├── url-guard.ts  ← the SSRF check a Worker can run: address, URL shape, redirect, body cap
+│       ├── crypto.ts     ← safeEqual() and hmacSha256(), on Web Crypto so a Worker runs them
+│       ├── webhook.ts    ← sign and verify, in Stripe's one-header format and Standard Webhooks
 │       └── node/         ← the one directory allowed Node: fetchPublic() resolves once, dials pinned
 ├── scripts/
 │   └── check-release.ts  ← packs each package and checks what the registry would get
@@ -208,7 +210,7 @@ both Bun 1.3.8 and Node 22. It is the driver's, not the runner's, and `describeT
 brackets is still right for the guard. Someone on IPv6 loopback writes `localhost` or passes the
 host outside the URL.
 
-### …and sixteen for `@gusnips/server`
+### …and seventeen for `@gusnips/server`
 
 21. **A success builder returns an ANSWER, not a body — so on Hono, import the adapters.** `ok`,
     `created`, `paginated` and `noContent` in `responses.ts` answer `{ status, body }`, because the
@@ -524,6 +526,20 @@ Unhandled error event:", ...)` and returns — it never emits, so Node's throw i
     throws reads as no peer rather than failing every in-process test. No address is `null`, not
     `"unknown"`: seven readers put every such request in one window that one caller could fill for
     everyone.
+
+37. **A webhook is checked against its age and against every signature in it, and an unset secret
+    refuses.** Three verifiers in the fleet never compared the timestamp to the clock, one of them
+    the recipe a product publishes to its customers, so a captured delivery passed forever. Standard
+    Webhooks separates signatures with a space and Supabase Auth with `", "`: the verifier that
+    split on one space refused every auth hook whenever its secret was the first of two (measured),
+    and another kept only the last `v1`, so it could not verify during a rotation. Both formats now
+    try every signature against every secret, and they share only the HMAC and the comparison,
+    because a fix to one must not change the other. An unset secret is refused by the code, never
+    left to the runtime: `safeEqual("", "")` answered `true` in five copies, and Node's `createHmac`
+    signs with an empty key where Web Crypto refuses one, so a check that leaned on the runtime was
+    closed on Bun and open on Node (measured with the Stripe SDK the fleet pins). And a multibyte
+    signature fails rather than throws: one copy compared string lengths and then bytes, which is a
+    `RangeError` any stranger could raise.
 
 ## What the build measured
 
