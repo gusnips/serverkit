@@ -1,3 +1,4 @@
+import IORedis from "ioredis";
 import { describe, expect, it, vi } from "vitest";
 import { assertRedisReachable, createRedis, pingRedis } from "./index.ts";
 
@@ -37,16 +38,53 @@ describe("createRedis", () => {
     expect(c.options.port).toBe(1);
   });
 
-  it("attaches the error listener, so a blip cannot take the process down", () => {
+  it("attaches the error listener, so a failed connect reaches the app's logger", () => {
     const onError = vi.fn();
     const c = createRedis({ url: "redis://127.0.0.1:1", lazyConnect: true, onError });
-    // One listener is the assertion: with zero, ioredis's emit on a failed connect becomes an
-    // uncaught exception, and a backend whose crash handler exits dies on a reconnect it would
-    // have made by itself.
+    // One listener is the assertion: with zero, ioredis prints a bare stack to stderr and the
+    // app's own log says nothing. It does not crash the process; see `onError` in index.ts.
     expect(c.listenerCount("error")).toBe(1);
     const boom = new Error("ECONNREFUSED");
     c.emit("error", boom);
     expect(onError).toHaveBeenCalledWith(boom);
+  });
+});
+
+describe("createRedis and a URL with options in it", () => {
+  it("is guarding against what ioredis does: the query beats the options, as strings", () => {
+    // ioredis itself, with no createRedis in between. When this stops holding, the guard below
+    // may have stopped being needed.
+    const raw = new IORedis("redis://127.0.0.1:1?maxRetriesPerRequest=7&enableOfflineQueue=false", {
+      lazyConnect: true,
+      maxRetriesPerRequest: null,
+      enableOfflineQueue: true,
+    });
+    expect(raw.options.maxRetriesPerRequest).toBe("7");
+    expect(raw.options.enableOfflineQueue).toBe("false");
+  });
+
+  it("refuses the URL, and says nothing that was in it", () => {
+    for (const url of [
+      "redis://:hunter2@127.0.0.1:1/0?maxRetriesPerRequest=7",
+      "redis://127.0.0.1:1?family=6",
+      "redis://:hunter2?@127.0.0.1:1",
+      "/tmp/redis.sock?db=2",
+    ]) {
+      const message = (() => {
+        try {
+          client({ url });
+          return "did not throw";
+        } catch (error) {
+          return String(error);
+        }
+      })();
+      expect(message).toContain('The Redis URL has options after its "?"');
+      expect(message).not.toContain("hunter2");
+    }
+  });
+
+  it("takes a URL with nothing after its ?", () => {
+    expect(client({ url: "redis://127.0.0.1:1?" }).options.port).toBe(1);
   });
 });
 

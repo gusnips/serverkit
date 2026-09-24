@@ -520,6 +520,11 @@ retry limit. So the default is right and it has a consequence worth saying once:
 check, a `queue.add()` — with Redis down, each waits rather than failing. Pass
 `maxRetriesPerRequest: 3` for a connection that serves ordinary commands instead of BullMQ's.
 
+**A URL with options after its `?` is refused.** ioredis lets those beat the options you pass,
+and reads each as a string: `?maxRetriesPerRequest=7` replaces the `null` BullMQ needs, and
+`?enableOfflineQueue=false` is the string "false", which ioredis reads as on. Pass them to
+`createRedis` instead, such as `family: 6`.
+
 Readiness is the worked example, and it has a deadline:
 
 ```ts

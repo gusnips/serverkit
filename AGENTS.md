@@ -454,6 +454,16 @@ Infinity` default turns a typo'd `DATABASE_URL` into a boot that hangs instead o
     second, and reading the config comment is what separates them — it says, out loud, that the
     command timeout was "removed to allow BullMQ operations to complete properly".
 
+    **And the `null` could be undone from the URL, with nothing in the code to show it.** ioredis
+    reads options from `REDIS_URL`'s query, lets them beat the options passed beside it, and keeps
+    each as a string, so `?maxRetriesPerRequest=7` replaced the kit's `null` and
+    `?enableOfflineQueue=false` arrived as the string "false", which ioredis reads as on (measured
+    on 5.11.1, under bun and node). One backend refused any query in the URL; `createRedis` does
+    now, and a test pins the ioredis behaviour, so the guard's reason is checked rather than
+    remembered. It refuses the whole query, not only the keys it passes itself, because a string
+    value is wrong even where nothing collides. The message names no key: in a URL whose password
+    holds an unencoded `?`, the "key" is the rest of the password.
+
     The connection factory behind all of this was **byte-identical in four backends**, comment
     included, and one of those comments says out loud that it was copied from a sibling repo —
     including the half of it that is false. All four state that an EventEmitter with no `error`

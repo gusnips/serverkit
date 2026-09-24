@@ -77,11 +77,31 @@ export interface CreateRedisOptions extends RedisOptions {
  * process can exit.
  */
 export function createRedis({ url, onError, ...options }: CreateRedisOptions): IORedis {
+  if (url) refuseQueryOptions(url);
   const client = url
     ? new IORedis(url, { maxRetriesPerRequest: null, ...options })
     : new IORedis({ maxRetriesPerRequest: null, ...options });
   client.on("error", onError);
   return client;
+}
+
+/**
+ * ioredis reads options from the URL's query, lets them beat the options passed beside the URL,
+ * and keeps each value as a string. So `?maxRetriesPerRequest=7` replaces the `null` BullMQ needs,
+ * and `?enableOfflineQueue=false` is the string "false", which ioredis reads as on (measured on
+ * 5.11.1). Every option has a typed place in `createRedis`'s own, so the URL may carry none.
+ *
+ * The message names no key: in a URL whose password holds an unencoded `?`, the "key" is the
+ * rest of the password.
+ */
+function refuseQueryOptions(url: string): void {
+  const at = url.indexOf("?");
+  if (at >= 0 && new URLSearchParams(url.slice(at + 1)).size > 0)
+    throw new TypeError(
+      'The Redis URL has options after its "?". ioredis lets those beat the options you pass, ' +
+        'and reads each one as a string, so "false" turns an option on. Take them out of the URL ' +
+        "and pass them to createRedis, such as { family: 6 }.",
+    );
 }
 
 export interface RedisPingOptions {
