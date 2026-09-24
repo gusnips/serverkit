@@ -45,6 +45,10 @@
     "./mail": {
       "types": "./dist/node/mail/index.d.ts",
       "default": "./dist/node/mail/index.js"
+    },
+    "./openapi": {
+      "types": "./dist/openapi/index.d.ts",
+      "default": "./dist/openapi/index.js"
     }
   },
   "types": "./dist/index.d.ts",
@@ -74,7 +78,8 @@
     "ssrf",
     "bullmq",
     "nodemailer",
-    "mcp"
+    "mcp",
+    "openapi"
   ],
   "scripts": {
     "build": "rm -rf dist && tsc -p tsconfig.build.json",

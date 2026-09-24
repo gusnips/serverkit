@@ -58,6 +58,7 @@ serverkit/
 │       ├── redis/        ← createRedis(), the bounded probes, and the rate-limit window store
 │       ├── bullmq/       ← queues that delete finished jobs, the dead letter, the schedule sync
 │       ├── mcp/          ← the MCP door: tools that never throw, a limit per call, POST only
+│       ├── openapi/      ← buildOpenApi(): the reference from the operation list, on the public origin
 │       ├── rate-limit.ts ← hitWindow() and the memory store; rateLimit() is in hono/
 │       ├── client-ip.ts  ← clientIpOf() and ipSubject(): the socket first, a header only from the proxy
 │       ├── ip.ts         ← the IPv4 and IPv6 parsers url-guard and client-ip share; not exported
@@ -221,7 +222,7 @@ both Bun 1.3.8 and Node 22. It is the driver's, not the runner's, and `describeT
 brackets is still right for the guard. Someone on IPv6 loopback writes `localhost` or passes the
 host outside the URL.
 
-### …and twenty-seven for `@gusnips/server`
+### …and twenty-eight for `@gusnips/server`
 
 21. **A success builder returns an ANSWER, not a body — so on Hono, import the adapters.** `ok`,
     `created`, `paginated` and `noContent` in `responses.ts` answer `{ status, body }`, because the
@@ -783,6 +784,38 @@ Unhandled error event:", ...)` and returns — it never emits, so Node's throw i
     needs no length limit and a long key is not a 400. The test for that uses a random key: a
     repeated character compresses small enough to fit the index unhashed, so the first version of
     the test passed with the hashing removed.
+
+48. **A reference names the public origin, carries the mount prefix, and uses each operation id
+    once.** Five backends each built an OpenAPI 3.1 document from their operation list, in three
+    lineages. Four built `servers` from the request's URL. Behind the reverse proxy that is the
+    loopback, so all four production references advertised `http://127.0.0.1:<port>`. The fifth
+    wrote its production origin by hand, and the audit's first reading called that one the bug.
+    One of the four also named no `/v1` while every operation was mounted under it, so the right
+    host still answered 404 on every path. And the same one published one operation id five times,
+    because one tool rode five paths and the id was `${name}_${method}`. So `origin` and `basePath`
+    are required options, and a repeated id throws with both routes in the message. Measured
+    against that backend's real catalog, the builder refused its first run on a sixth case: one
+    operation on POST and PUT of one path. That is the guard working. The adopter keeps its own id
+    rule by passing `operationId`.
+
+    **`default` is two different words in one document.** Under a schema it is data, and the
+    translation walk must not touch it. Under `responses` it is the answer to any other status, and
+    its description is prose. The first walk skipped the key everywhere, so the catch-all response
+    shipped in English, and a test written to collect every string caught it. The walk now reads
+    the children of `responses`, `content`, `headers` and `properties` as names, not keywords.
+    That also keeps a field NAMED `example` translatable while an `example` VALUE is not.
+
+    **zod writes a recursive schema as `$ref: "#"`, not `$defs`.** Inside the document, `#` is the
+    document's root, so the first guard (`"$defs" in json`) let it through, and the planted-defect
+    run is what showed it. The guard now refuses a `$ref` of `#`, `#/$defs/…` or
+    `#/definitions/…`, and lets through a `#/components/…` ref you wrote yourself.
+
+    Schemas convert through Standard JSON Schema: zod 4.4 and later has it on every schema, and the
+    output is byte-identical to `z.toJSONSchema(s, { io })`. So the subpath imports nothing, and
+    zod is not a peer. `unrepresentable: "any"` is passed to zod only, because the options are
+    vendor-specific. `Retry-After` is documented on 409, 429 and 503, where this package's own code
+    sends it, and not on 402, which no raise in the fleet sends it on. All 42 planted defects were
+    caught, with a green control.
 
 ## What the build measured
 

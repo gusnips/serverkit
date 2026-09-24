@@ -50,6 +50,7 @@ import {
 } from "./hono/index.ts";
 import type { RequestVariables } from "./hono/index.ts";
 import { mcpRoutes, registerOperation, type ToolOperation } from "./mcp/index.ts";
+import { buildOpenApi, createOpenApiResponder, type OpenApiOperation } from "./openapi/index.ts";
 import { isAuthOutage } from "./supabase/index.ts";
 import { createPgPool, pingPool } from "./pg/index.ts";
 import { createRedis, redisWindowStore } from "./redis/index.ts";
@@ -479,6 +480,48 @@ describe("README — an MCP door", () => {
 
     for (const path of ["/mcp", "/mcp/"])
       expect((await post(path, call(99, "find_places", { q: "x" }), "wrong")).status).toBe(401);
+  });
+});
+
+describe("README — a reference for your API", () => {
+  it("names the configured origin and splits the input the way the section says", async () => {
+    const OPERATIONS: OpenApiOperation[] = [
+      {
+        name: "pair_number",
+        method: "post",
+        path: "/numbers/:id/pair",
+        tag: "Numbers",
+        summary: "Pair a number",
+        input: z.object({ id: z.string(), method: z.enum(["qr", "code"]) }).strict(),
+        response: z.object({ status: z.string() }),
+      },
+    ];
+    const reference = createOpenApiResponder(() =>
+      buildOpenApi(OPERATIONS, {
+        info: { title: "Acme API", version: "1.0.0" },
+        origin: "https://api.acme.test",
+        basePath: "/v1",
+        tags: [{ name: "Numbers", description: "The phone numbers on your account." }],
+        securitySchemes: { bearerAuth: { type: "http", scheme: "bearer" } },
+        errors: { 400: "The input is wrong.", 401: "The key is missing or wrong." },
+      }),
+    );
+    const app = new Hono();
+    app.get("/openapi.json", (c) => reference(c.req.query("lang")));
+
+    // Asked on the loopback, the way a proxy hands every request over.
+    const res = await app.request("http://127.0.0.1:3000/openapi.json");
+    const doc: {
+      servers: { url: string }[];
+      paths: Record<string, Record<string, Record<string, unknown>>>;
+    } = JSON.parse(await res.text());
+    expect(doc.servers).toEqual([{ url: "https://api.acme.test/v1" }]);
+    const pair = doc.paths["/numbers/{id}/pair"]?.["post"];
+    expect(pair?.["parameters"]).toMatchObject([{ name: "id", in: "path", required: true }]);
+    expect(JSON.stringify(pair?.["requestBody"])).toContain('"properties":{"method"');
+    expect(JSON.stringify(pair?.["responses"])).toContain(
+      '"data":{"type":"object","properties":{"status":{"type":"string"}}',
+    );
   });
 });
 

@@ -1138,6 +1138,83 @@ eight backends said in a comment that they served both, and answered `/mcp/` wit
 We tested the SDK at 1.29.0 and 1.30.1, and Hono at 4.12.26 and 4.13.8. `@modelcontextprotocol/sdk`
 is an optional peer, behind the `/mcp` subpath, and the subpath imports nothing from Node.
 
+## A reference for your API
+
+An OpenAPI document is the one file that docs sites, client generators and agents read to learn
+your routes. Build it from the list of operations your API already mounts:
+
+```ts
+import { z } from "zod";
+import {
+  buildOpenApi,
+  createOpenApiResponder,
+  type OpenApiOperation,
+} from "@gusnips/server/openapi";
+
+const OPERATIONS: OpenApiOperation[] = [
+  {
+    name: "pair_number",
+    method: "post",
+    path: "/numbers/:id/pair",
+    tag: "Numbers",
+    summary: "Pair a number",
+    input: z.object({ id: z.string(), method: z.enum(["qr", "code"]) }).strict(),
+    response: z.object({ status: z.string() }),
+  },
+];
+
+const reference = createOpenApiResponder(() =>
+  buildOpenApi(OPERATIONS, {
+    info: { title: "Acme API", version: "1.0.0" },
+    origin: "https://api.acme.test", // from your config
+    basePath: "/v1",
+    tags: [{ name: "Numbers", description: "The phone numbers on your account." }],
+    securitySchemes: { bearerAuth: { type: "http", scheme: "bearer" } },
+    errors: { 400: "The input is wrong.", 401: "The key is missing or wrong." },
+  }),
+);
+
+app.get("/openapi.json", (c) => reference(c.req.query("lang")));
+```
+
+`POST /v1/numbers/{id}/pair` then takes `id` in the path and `method` in a JSON body, and answers
+`{ data: { status } }`. A GET or DELETE takes its fields in the query string instead.
+
+- **`origin` comes from config, never from the request.** Behind a proxy every request arrives on
+  `127.0.0.1`. Four of five APIs built their reference from the request, so it sent every
+  "Try it" button, every generated client and every agent to the reader's own machine.
+- **`basePath` is required, even when it is `""`.** The server and the path together are the
+  route. One API left out its `/v1`, so every path in its reference answered 404.
+- **An operation id is used once.** By default it is the operation's `name`. When one operation is
+  mounted on two paths or two methods, give each an `operationId`. A repeat throws: one API
+  published the same id five times, and a generated client keeps one of the five.
+- **A path slot may carry a field of another name.** `params: { numberId: "id" }` sends `numberId`
+  in `/numbers/:id`. List fields the route fills in itself, such as a `type` the path decides, in
+  `fixed`, and they stay out of the reference.
+- **Every refusal points at one `ApiError` schema**, the `{ error }` envelope. A 409, a 429 and a
+  503 also document `Retry-After`, because those are the ones this package's own code sends it on.
+- **Schemas are zod 4.4 or later, any other Standard JSON Schema, or plain JSON Schema.** A type
+  JSON cannot carry, such as a `Date`, is written as `{}` instead of failing the whole reference.
+  A schema that refers to itself throws, because inside the document its `$ref` would point at the
+  wrong thing.
+- **`mcpTools: true`** also lists each operation that is not `restOnly` under `x-mcp-tools`, once
+  per name, so your docs render both doors from one fetch.
+
+To serve other languages, pass one function per language. It gets each English string and returns
+the translation:
+
+```ts
+const reference = createOpenApiResponder(build, { "pt-BR": (text) => PT_BR[text] ?? text });
+```
+
+The title, tag descriptions, summaries and descriptions are translated. Examples, enums, defaults,
+names and the MCP tool list stay as written: an example is data your API returns, and agents read
+the tools. Each language is built once, on its first request. A `?lang=` you did not list gets the
+document as written. To list every string a translation needs, pass a collector to
+`translateProse(doc, (text) => (seen.add(text), text))`.
+
+The subpath imports nothing, so it runs in a Worker. zod loads only if your schemas are zod.
+
 ## Sending mail
 
 ```bash
@@ -1322,6 +1399,8 @@ Each of these was measured, not assumed.
 - A mail without a text part is refused.
 - A mail login is never sent over a connection without TLS.
 - An MCP tool handler never throws, and a tool's `.shape` does not compile.
+- An API reference names the origin you configure, never the one a request came in on. A
+  repeated operation id, a tag you did not list, or a schema that refers to itself throws.
 - A webhook delivery never retries a 4xx or a redirect, and never comes back sooner than
   `Retry-After` asks, up to an hour.
 - An idempotency key reused for a different request is refused, never replayed, and a failed save
