@@ -556,6 +556,42 @@ was longer, and a caller that needs all of it (an image, a JSON document) refuse
 In a Cloudflare Worker, that is the whole check: a Worker cannot resolve a name, and the network
 behind its `fetch` is not your box's. On a server, a name still has to be resolved, and the
 request sent to the address you checked rather than to whatever DNS answers a moment later.
+That is `/node`:
+
+```ts
+import { fetchPublic } from "@gusnips/server/node";
+
+const result = await fetchPublic(endpoint.url, {
+  method: "POST",
+  headers: { "content-type": "application/json" },
+  body: JSON.stringify(event),
+  maxRedirects: 0,
+  signal: AbortSignal.timeout(10_000),
+});
+if (!result.ok) return refuse(result.reason); // your words, as above
+result.response.status; // a real Response
+```
+
+- **It resolves the name once and refuses it if any answer is private.** A name with one public
+  and one private record is refused as a whole. Then it sends the request to one of the addresses
+  it checked, with the name in the TLS check and in `Host`. Checking a name and then calling
+  `fetch` resolves it twice, and a DNS server that changes its answer in between wins.
+- **It follows up to 5 redirects and checks each one before sending it.** `maxRedirects: 0` hands
+  a redirect back as the answer, which is what a webhook wants.
+- **`signal` is required.** It bounds the DNS lookup, the connection, the wait and the body.
+- **It tries another address only when one refused the connection.** After a timeout it stops:
+  the first address may have received the webhook, and the next would deliver it twice.
+- **A name DNS does not know is `unresolvable`. A DNS lookup that fails throws**, because telling
+  a customer their host does not exist when your resolver is down names the wrong cause.
+- **The body is decoded**, so `readBounded` counts the bytes that come out. Ten megabytes of
+  gzipped zeros is ten kilobytes on the wire.
+
+Check once when the URL is saved, with `resolvePublic`, so a bad one gets a 400 right away.
+`fetchPublic` checks again when it sends, because DNS can change in between.
+
+**Run it on Bun 1.4.2 or later, or on Node 22.** Bun 1.3.8 checks the certificate against the
+`Host` header rather than the name it is given, so an https URL on a port other than 443 fails.
+It also sends a request a second time on its own when a reused connection is reset.
 
 ## What this package does not ship
 

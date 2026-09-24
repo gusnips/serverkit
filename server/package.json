@@ -29,6 +29,10 @@
     "./redis": {
       "types": "./dist/redis/index.d.ts",
       "default": "./dist/redis/index.js"
+    },
+    "./node": {
+      "types": "./dist/node/index.d.ts",
+      "default": "./dist/node/index.js"
     }
   },
   "types": "./dist/index.d.ts",
@@ -54,7 +58,8 @@
     "supabase",
     "typescript",
     "postgres",
-    "redis"
+    "redis",
+    "ssrf"
   ],
   "scripts": {
     "build": "rm -rf dist && tsc -p tsconfig.build.json",

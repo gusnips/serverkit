@@ -9,9 +9,11 @@ Entry point for AI agents working on this repo.
 - **`@gusnips/server`** is the answer edge: the error class, the wire envelope and its mask, the
   JSON logger, a `/hono` subpath with the middleware and the four success adapters, and a
   `/supabase` subpath holding the one decision a backend makes about Supabase Auth's answers, a
-  `/pg` subpath holding the two a backend makes when it creates a connection pool, and a `/redis`
+  `/pg` subpath holding the two a backend makes when it creates a connection pool, a `/redis`
   subpath holding the connection every backend on this stack opens for BullMQ and the bounded
-  probes that make it safe to read from. **No required peer.** `@gusnips/http` is used for its
+  probes that make it safe to read from, and a `/node` subpath for what only a Node or Bun process
+  can do: `fetchPublic`, the SSRF-safe fetch that resolves a customer's URL once and sends to the
+  address it checked. The half of that guard a Worker can run is at the root. **No required peer.** `@gusnips/http` is used for its
   types and nothing else, so it erases and is optional; `hono`, `@supabase/supabase-js`, `pg` and
   `ioredis` are optional and reachable only behind their subpaths.
 
@@ -52,7 +54,9 @@ serverkit/
 │       ├── logger/       ← createLogger() and the serializer that decides what a log line keeps
 │       ├── hono/         ← the edge: errorBoundary, errorHandler, guards, and the four adapters
 │       ├── supabase/     ← isAuthOutage(): did auth say no, or fail to answer?
-│       └── pg/           ← createPgPool(): the wait is bounded, the idle handler is required
+│       ├── pg/           ← createPgPool(): the wait is bounded, the idle handler is required
+│       ├── url-guard.ts  ← the SSRF check a Worker can run: address, URL shape, redirect, body cap
+│       └── node/         ← the one directory allowed Node: fetchPublic() resolves once, dials pinned
 ├── scripts/
 │   └── check-release.ts  ← packs each package and checks what the registry would get
 └── AGENTS.md             ← this file
@@ -200,7 +204,7 @@ both Bun 1.3.8 and Node 22. It is the driver's, not the runner's, and `describeT
 brackets is still right for the guard. Someone on IPv6 loopback writes `localhost` or passes the
 host outside the URL.
 
-### …and twelve for `@gusnips/server`
+### …and fourteen for `@gusnips/server`
 
 21. **A success builder returns an ANSWER, not a body — so on Hono, import the adapters.** `ok`,
     `created`, `paginated` and `noContent` in `responses.ts` answer `{ status, body }`, because the
@@ -459,6 +463,35 @@ Unhandled error event:", ...)` and returns — it never emits, so Node's throw i
     there the listener really is what stands between an idle-client error and a crash. Copying one
     library's sentence onto another is the whole mechanism here, and four repos copying it is what
     made it look measured. **A sentence four files agree on is still one observation.**
+
+33. **A URL a customer names is checked at every hop, before the hop is sent, and the request
+    goes to an address that was checked.** Twelve backends wrote this guard in six independent
+    lineages, and each of the three halves was missing somewhere. One followed redirects with
+    `redirect: "follow"` and checked only where they ended, so a listener on loopback received
+    the request before the check ran (measured). One judged an IPv4-mapped IPv6 address only in
+    its dotted form, and `new URL` writes it in hex, so `::ffff:7f00:1` read as public. Five
+    checked a name and then let `fetch` resolve it a second time, which is the gap DNS
+    rebinding lives in. So `nextHop` re-checks the next URL before anyone dials it, IPv6 is an
+    ALLOW-list (2000::/3 minus the blocks that embed an IPv4 address), an address that does not
+    parse is not public, and `pinnedRequest` sends to the literal it was handed. A name with one
+    private answer among public ones is refused as a whole, which is what makes every surviving
+    address equally safe to dial. `allowLoopback` relaxes loopback and nothing else, because two
+    donors had a flag that skipped the whole guard and nothing refused it in production.
+
+34. **The pinned dial rests on a runtime fact, and Bun 1.3.8 gets it wrong.** It sends to the IP
+    literal and puts the name in `servername` and in `Host`. Measured with a local CA and against
+    a public host: Node 22.22 and Bun 1.4.2 check the certificate against `servername`, refuse a
+    wrong one, and fall back to `Host` when there is none. Bun 1.3.8 ignores `servername` and
+    checks `Host` verbatim, port included, so an https URL on any other port than 443 is refused.
+    It also re-sends a request on its own when a reused connection is reset, so a POST can arrive
+    twice. The test file fails in exactly those two places on 1.3.8 and passes on the other two,
+    run with each runtime's own `--bun`. One donor's comment credits `tls.serverName` with the
+    check, measured against a public host on 1.3.8; that runtime was reading the `Host` header,
+    which the donor had also set to the name. Its pinning was safe for a reason other than the
+    one it wrote down. **A measurement that agrees with you can still be measuring
+    something else.** The same matrix settled a smaller question: under 1.3.8, aborting a
+    gzip body ended it early when the REQUEST was destroyed and failed it when the RESPONSE was,
+    so `dial` destroys the response once there is one.
 
 ## What the build measured
 
