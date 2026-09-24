@@ -7,7 +7,16 @@
 import { AuthApiError, AuthRetryableFetchError } from "@supabase/supabase-js";
 import { describe, expect, it } from "vitest";
 import { Hono } from "hono";
-import { createAppError, createErrorResponse, createLogger, ok, paginated } from "./index.ts";
+import {
+  checkUrlShape,
+  createAppError,
+  createErrorResponse,
+  createLogger,
+  nextHop,
+  ok,
+  paginated,
+  readBounded,
+} from "./index.ts";
 import {
   assertEveryRouteGuarded,
   errorBoundary,
@@ -174,5 +183,32 @@ describe("README — Postgres", () => {
   it("gives the readiness call the deadline the section promises", async () => {
     const hung = { query: () => new Promise<never>(() => {}) };
     await expect(pingPool(hung, { timeoutMs: 20 })).resolves.toBe(false);
+  });
+});
+
+describe("README — a URL somebody else gave you", () => {
+  it("refuses the metadata service in the words the section prints", () => {
+    expect(checkUrlShape("https://169.254.169.254/latest/meta-data/")).toEqual({
+      ok: false,
+      reason: "private-address",
+    });
+  });
+
+  it("turns a POST answered by 302 into a GET, as the snippet says", () => {
+    const url = new URL("https://api.example.com/hook");
+    const response = new Response(null, { status: 302, headers: { location: "/moved" } });
+    const headers = new Headers({ "content-type": "application/json" });
+    expect(nextHop(url, response, { method: "POST", headers })).toMatchObject({
+      ok: true,
+      method: "GET",
+      dropBody: true,
+    });
+  });
+
+  it("stops at the limit it was given", async () => {
+    const body = new Response("x".repeat(1_000_001)).body;
+    const { bytes, truncated } = await readBounded(body, 1_000_000);
+    expect(bytes.byteLength).toBe(1_000_000);
+    expect(truncated).toBe(true);
   });
 });

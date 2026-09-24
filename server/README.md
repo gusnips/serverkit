@@ -509,6 +509,54 @@ it decides when your process can exit.
 `ioredis` is an optional peer, behind the `/redis` subpath, so importing `@gusnips/server` never
 installs it.
 
+## A URL somebody else gave you
+
+A webhook endpoint, a link to read, an image to fetch: each is a customer telling your server to
+send a request. Your server shares a network with Postgres, Redis and the cloud metadata service
+at 169.254.169.254, so an unchecked URL lets anyone who can save one aim it inward.
+
+```ts
+import { checkUrlShape } from "@gusnips/server";
+
+checkUrlShape("https://169.254.169.254/latest/meta-data/");
+// → { ok: false, reason: "private-address" }
+```
+
+It answers with a result, not a throw, so the 400 is in your words. The reasons are `invalid`,
+`scheme`, `credentials`, `port`, `internal-name` and `private-address`.
+
+- **Only `https:` by default.** A reader of pasted links passes
+  `{ schemes: ["http:", "https:"] }`.
+- **`ports: [80, 443]`** is the smaller blast radius when nothing needs more. DNS can move a
+  host; it cannot move a port.
+- **`allowLoopback: true`** lets `localhost`, 127.0.0.0/8 and `::1` through for a test, and
+  nothing else. Never a private range, never the metadata service.
+
+Twelve backends wrote this check. The most-copied version let carrier-grade NAT through, and
+another judged `::ffff:127.0.0.1` safe once the URL parser had rewritten it as `::ffff:7f00:1`.
+`isPublicAddress` accepts only global addresses, so a spelling nobody thought of is refused
+rather than waved through.
+
+**Follow a redirect yourself, and check every hop.** With `redirect: "follow"`, fetch has already
+sent a request to each hop by the time you can check where it ended:
+
+```ts
+const hop = nextHop(url, response, { method: "POST", headers });
+// null: not a redirect. { ok: false, reason }: refuse. Otherwise the next request:
+// hop.url, hop.method, hop.headers, and hop.dropBody when a 302 turned a POST into a GET.
+```
+
+It rewrites the method the way fetch does, and it keeps `Authorization`, `Cookie` and
+`Proxy-Authorization` from reaching another origin.
+
+**Read the answer with a limit.** `readBounded(response.body, 1_000_000)` stops at a million
+bytes and cancels the rest. It never trusts `Content-Length`. When `truncated` is true, the body
+was longer, and a caller that needs all of it (an image, a JSON document) refuses.
+
+In a Cloudflare Worker, that is the whole check: a Worker cannot resolve a name, and the network
+behind its `fetch` is not your box's. On a server, a name still has to be resolved, and the
+request sent to the address you checked rather than to whatever DNS answers a moment later.
+
 ## What this package does not ship
 
 Each of these was measured, not assumed.

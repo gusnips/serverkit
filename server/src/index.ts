@@ -13,3 +13,11 @@ export type { CannedError, ErrorAnswer, ErrorResponseOptions } from "./responses
 export type { ValidationIssue } from "@gusnips/http";
 export { createLogger, errorReplacer, keptErrorFields } from "./logger/index.ts";
 export type { Logger, LoggerOptions, LogLevel, LogThreshold } from "./logger/index.ts";
+export {
+  checkUrlShape,
+  isInternalHostname,
+  isPublicAddress,
+  nextHop,
+  readBounded,
+} from "./url-guard.ts";
+export type { Hop, UrlPolicy, UrlRefusal, UrlRefusalReason, UrlShape } from "./url-guard.ts";
