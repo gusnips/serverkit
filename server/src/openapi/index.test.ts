@@ -323,6 +323,25 @@ describe("translateProse", () => {
     expect(post["operationId"]).toBe("pair_number");
   });
 
+  it("translates only the x- fields it is told are prose", () => {
+    const billed: OpenApiOperation = {
+      ...pair,
+      extensions: { "x-credits": "1 credit per pair.", "x-grant": "numbers:write" },
+    };
+    const doc = translateProse(buildOpenApi([billed], options), upper, {
+      proseExtensions: ["x-credits"],
+    });
+    const post = op(doc, "/numbers/{id}/pair", "post");
+    expect(post["x-credits"]).toBe("1 CREDIT PER PAIR.");
+    expect(post["x-grant"]).toBe("numbers:write");
+    const plain = op(
+      translateProse(buildOpenApi([billed], options), upper),
+      "/numbers/{id}/pair",
+      "post",
+    );
+    expect(plain["x-credits"]).toBe("1 credit per pair.");
+  });
+
   it("keeps the MCP cards as written, because agents read them", () => {
     const doc = translateProse(buildOpenApi([pair], { ...options, mcpTools: true }), upper);
     expect(doc["x-mcp-tools"]?.[0]).toMatchObject({ title: "Pair a number" });
@@ -359,6 +378,16 @@ describe("createOpenApiResponder", () => {
     expect(await titleIn("toString")).toBe("Example API");
     await titleIn("upper");
     expect(builds).toBe(2);
+  });
+
+  it("hands its options to the translation", async () => {
+    const billed: OpenApiOperation = { ...pair, extensions: { "x-credits": "1 credit per pair." } };
+    const reference = createOpenApiResponder(
+      () => buildOpenApi([billed], options),
+      { upper: (text) => text.toUpperCase() },
+      { proseExtensions: ["x-credits"] },
+    );
+    expect(await reference("upper").text()).toContain('"x-credits":"1 CREDIT PER PAIR."');
   });
 
   it("answers JSON that a CDN may keep for five minutes", () => {

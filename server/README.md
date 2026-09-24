@@ -1238,6 +1238,14 @@ the tools. Each language is built once, on its first request. A `?lang=` you did
 document as written. To list every string a translation needs, pass a collector to
 `translateProse(doc, (text) => (seen.add(text), text))`.
 
+An `x-` field stays as written in every language, because most are data: a scope name, an SDK
+method. When one is a sentence, such as an `x-credits` that says "1 credit per page", name it, and
+pass the same list to the collector:
+
+```ts
+const reference = createOpenApiResponder(build, translations, { proseExtensions: ["x-credits"] });
+```
+
 The subpath imports nothing, so it runs in a Worker. zod loads only if your schemas are zod.
 
 ## Sending mail

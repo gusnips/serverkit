@@ -80,7 +80,10 @@ export interface OpenApiOperation {
   restOnly?: boolean;
   /** Set it when one operation is mounted on more than one path; ids must not repeat. */
   operationId?: string;
-  /** `x-` fields to write onto the operation as they are, such as `x-credits`. */
+  /**
+   * `x-` fields to write onto the operation as they are, such as `x-credits`. They stay as
+   * written in every language unless `proseExtensions` names them.
+   */
   extensions?: Record<`x-${string}`, unknown>;
 }
 
@@ -421,6 +424,15 @@ const DATA_KEYS = new Set(["example", "examples", "default", "enum", "const"]);
  */
 const NAME_KEYS = new Set(["properties", "patternProperties", "responses", "content", "headers"]);
 
+export interface TranslateOptions {
+  /**
+   * `x-` fields whose value is a sentence someone reads, such as `["x-credits"]` when it says
+   * "1 credit per page". Every other `x-` field is data — a scope name, an SDK method — and a
+   * collector listing it would ask a translator for a word the API matches on.
+   */
+  proseExtensions?: readonly `x-${string}`[];
+}
+
 /**
  * The document with every `summary`, every `description` and the title passed through `t`.
  *
@@ -428,13 +440,18 @@ const NAME_KEYS = new Set(["properties", "patternProperties", "responses", "cont
  * are read by agents, which is why their prose stays English. Pass a collector as `t` to list
  * every string a translation needs: `translateProse(doc, (s) => (seen.add(s), s))`.
  */
-export function translateProse(doc: OpenApiDocument, t: (text: string) => string): OpenApiDocument {
+export function translateProse(
+  doc: OpenApiDocument,
+  t: (text: string) => string,
+  options: TranslateOptions = {},
+): OpenApiDocument {
+  const prose = new Set<string>(["summary", "description", ...(options.proseExtensions ?? [])]);
   const walkObject = (node: JsonObject, names = false): JsonObject =>
     Object.fromEntries(
       Object.entries(node).map(([key, value]) => {
         if (names) return [key, walk(value)];
         if (DATA_KEYS.has(key)) return [key, value];
-        if ((key === "summary" || key === "description") && typeof value === "string") {
+        if (prose.has(key) && typeof value === "string") {
           return [key, t(value)];
         }
         return [key, walk(value, NAME_KEYS.has(key))];
@@ -493,11 +510,12 @@ function isMethod(key: string): key is HttpMethod {
  *
  * The document is built on the first request, so the list can be filled while routes mount, and
  * each language is built once and kept. A language with no entry gets the document as written,
- * so an unknown `?lang=` cannot grow the cache.
+ * so an unknown `?lang=` cannot grow the cache. `options` goes to `translateProse`.
  */
 export function createOpenApiResponder(
   build: () => OpenApiDocument,
   translations: Readonly<Record<string, (text: string) => string>> = {},
+  options: TranslateOptions = {},
 ): (lang?: string) => Response {
   const bodies = new Map<string, string>();
   return (lang) => {
@@ -506,7 +524,7 @@ export function createOpenApiResponder(
     if (body === undefined) {
       const doc = build();
       const t = translations[key];
-      body = JSON.stringify(t === undefined ? doc : translateProse(doc, t));
+      body = JSON.stringify(t === undefined ? doc : translateProse(doc, t, options));
       bodies.set(key, body);
     }
     return new Response(body, {
