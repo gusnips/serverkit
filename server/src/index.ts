@@ -21,3 +21,13 @@ export {
   readBounded,
 } from "./url-guard.ts";
 export type { Hop, UrlPolicy, UrlRefusal, UrlRefusalReason, UrlShape } from "./url-guard.ts";
+export { hitWindow, memoryWindowStore } from "./rate-limit.ts";
+export type {
+  MemoryWindowStore,
+  MemoryWindowStoreOptions,
+  RefusedHit,
+  StoreFailurePolicy,
+  WindowHit,
+  WindowLimit,
+  WindowStore,
+} from "./rate-limit.ts";
