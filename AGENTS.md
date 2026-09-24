@@ -55,6 +55,8 @@ serverkit/
 │       ├── hono/         ← the edge: errorBoundary, errorHandler, guards, and the four adapters
 │       ├── supabase/     ← isAuthOutage(): did auth say no, or fail to answer?
 │       ├── pg/           ← createPgPool(): the wait is bounded, the idle handler is required
+│       ├── redis/        ← createRedis(), the bounded probes, and the rate-limit window store
+│       ├── rate-limit.ts ← hitWindow() and the memory store; rateLimit() is in hono/
 │       ├── url-guard.ts  ← the SSRF check a Worker can run: address, URL shape, redirect, body cap
 │       └── node/         ← the one directory allowed Node: fetchPublic() resolves once, dials pinned
 ├── scripts/
@@ -204,7 +206,7 @@ both Bun 1.3.8 and Node 22. It is the driver's, not the runner's, and `describeT
 brackets is still right for the guard. Someone on IPv6 loopback writes `localhost` or passes the
 host outside the URL.
 
-### …and fourteen for `@gusnips/server`
+### …and fifteen for `@gusnips/server`
 
 21. **A success builder returns an ANSWER, not a body — so on Hono, import the adapters.** `ok`,
     `created`, `paginated` and `noContent` in `responses.ts` answer `{ status, body }`, because the
@@ -492,6 +494,20 @@ Unhandled error event:", ...)` and returns — it never emits, so Node's throw i
     something else.** The same matrix settled a smaller question: under 1.3.8, aborting a
     gzip body ended it early when the REQUEST was destroyed and failed it when the RESPONSE was,
     so `dial` destroys the response once there is one.
+
+35. **A limiter says what a store outage means, and a count that crosses the network has a
+    deadline.** Three limiters in the fleet were documented "fails open" and hung instead: the
+    shared connection has `maxRetriesPerRequest: null`, which BullMQ needs, so a MULTI against a
+    Redis that is down never answers and the `catch` that would allow the request is never
+    reached. Measured against a closed port, it was still pending after 15 seconds. So
+    `redisWindowStore` takes a required `timeoutMs`, and `whenStoreFails` is required for any store
+    that can fail. It has no default, because the fleet uses both answers on purpose: a limit that
+    guards a promise allows, and one that guards a bill or a stranger's inbox refuses with the
+    product's own 503. The memory store cannot fail, so the types do not ask it. The count and its
+    expiry go in one MULTI, because the copy that sent `EXPIRE` separately can lose it and leave a
+    key over the limit forever. And the memory store sweeps once per closed window rather than
+    once per request: the donors that shed walked all 50,000 keys for every new one while full,
+    measured at 3.8 ms of event-loop time per shed request, which made the shed the flood's tool.
 
 ## What the build measured
 

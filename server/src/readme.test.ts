@@ -5,13 +5,15 @@
  * Every literal below is what the README prints beside the call.
  */
 import { AuthApiError, AuthRetryableFetchError } from "@supabase/supabase-js";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { Hono } from "hono";
 import {
   checkUrlShape,
   createAppError,
+  hitWindow,
   createErrorResponse,
   createLogger,
+  memoryWindowStore,
   nextHop,
   ok,
   paginated,
@@ -24,12 +26,14 @@ import {
   guard,
   notFoundHandler,
   ok as okRoute,
+  rateLimit,
   requestLogger,
   underAny,
 } from "./hono/index.ts";
 import type { RequestVariables } from "./hono/index.ts";
 import { isAuthOutage } from "./supabase/index.ts";
 import { createPgPool, pingPool } from "./pg/index.ts";
+import { createRedis, redisWindowStore } from "./redis/index.ts";
 
 type ErrorCode =
   "VALIDATION_ERROR" | "UNAUTHORIZED" | "NOT_FOUND" | "RATE_LIMIT_EXCEEDED" | "INTERNAL_ERROR";
@@ -210,5 +214,70 @@ describe("README — a URL somebody else gave you", () => {
     const { bytes, truncated } = await readBounded(body, 1_000_000);
     expect(bytes.byteLength).toBe(1_000_000);
     expect(truncated).toBe(true);
+  });
+});
+
+describe("README — a rate limit", () => {
+  type AppEnv = { Variables: RequestVariables<ErrorCode> & { userId?: string } };
+  afterEach(() => vi.useRealTimers());
+
+  it("answers the 301st request in a minute with your 429 and the seconds left", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(Date.UTC(2026, 8, 24, 12, 0, 45));
+    const logger = createLogger({ write: () => {} });
+    const app = new Hono<AppEnv>();
+    app.onError(errorHandler({ errorResponse, logger }));
+    app.use((c, next) => (c.set("userId", "u1"), next()));
+    app.use(
+      "/app/*",
+      rateLimit<AppEnv>({
+        scope: "app",
+        store: memoryWindowStore(),
+        limit: 300,
+        windowMs: 60_000,
+        key: (c) => c.get("userId") ?? null,
+        refuse: (hit) => errors.rateLimit(hit.retryAfterSecs),
+      }),
+    );
+    app.get("/app/me", (c) => c.text("ok"));
+
+    for (let i = 0; i < 300; i++) expect((await app.request("/app/me")).status).toBe(200);
+    const refused = await app.request("/app/me");
+    expect(refused.status).toBe(429);
+    expect(refused.headers.get("Retry-After")).toBe("15");
+  });
+
+  it("builds the Redis example as printed", () => {
+    const limitsRedis = createRedis({
+      url: "redis://127.0.0.1:1",
+      maxRetriesPerRequest: 1,
+      enableOfflineQueue: false,
+      commandTimeout: 1_000,
+      lazyConnect: true,
+      onError: () => {},
+    });
+    const logger = createLogger({ write: () => {} });
+    const limit = rateLimit<AppEnv>({
+      scope: "api",
+      store: redisWindowStore(limitsRedis, { timeoutMs: 500 }),
+      whenStoreFails: "allow",
+      logger,
+      limit: () => 60,
+      windowMs: 60_000,
+      key: (c) => c.get("userId") ?? null,
+      refuse: (hit) => errors.rateLimit(hit.retryAfterSecs),
+    });
+    expect(typeof limit).toBe("function");
+    limitsRedis.disconnect();
+  });
+
+  it("counts without Hono, and answers rather than throws", async () => {
+    const store = memoryWindowStore();
+    await hitWindow(store, "job:1", { limit: 1, windowMs: 60_000 }, 0);
+    expect(await hitWindow(store, "job:1", { limit: 1, windowMs: 60_000 }, 0)).toMatchObject({
+      outcome: "limited",
+      allowed: false,
+      retryAfterSecs: 60,
+    });
   });
 });

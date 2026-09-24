@@ -509,6 +509,86 @@ it decides when your process can exit.
 `ioredis` is an optional peer, behind the `/redis` subpath, so importing `@gusnips/server` never
 installs it.
 
+## A rate limit
+
+```ts
+import { memoryWindowStore } from "@gusnips/server";
+import { rateLimit } from "@gusnips/server/hono";
+
+app.use(
+  "/app/*",
+  rateLimit<AppEnv>({
+    scope: "app",
+    store: memoryWindowStore(),
+    limit: 300, // requests a minute, per user
+    windowMs: 60_000,
+    key: (c) => c.get("userId") ?? null,
+    refuse: (hit) => errors.rateLimit(hit.retryAfterSecs),
+  }),
+);
+```
+
+The 301st request in a minute gets your own 429, through your `onError`, and `Retry-After` says
+how many seconds are left in that minute. Windows start on the clock's minute, so the number is
+exact rather than a constant. A `key` that returns `null` lets the request through uncounted.
+
+**`key` must be something the server checked.** Before auth, that is the client's address. After
+auth, it is the verified user, key or account, never the raw bearer token: a limiter that counts
+the token counts whatever string the caller sends. On one backend, 300 requests from one address
+with a new random token each were refused 0 times.
+
+**The memory store counts per process** and starts again on every deploy. That is right for a
+burst limit in front of an auth round trip. It tracks 50,000 windows at most, and past that it
+refuses new ones, which `refuse` gets as `hit.outcome === "shed"`: that caller hit no limit, so
+your 429 can say the server is busy instead. It clears the closed windows once per window, not
+once per request. The copies it replaces did it once per request, which cost about 3.8 ms each
+on a full map, so a flood of spoofed addresses could keep a process busy doing nothing else.
+
+**A limit a plan sells goes in Redis**, so it holds across a restart and a second process:
+
+```ts
+import { createRedis, redisWindowStore } from "@gusnips/server/redis";
+
+// Its own connection, one that fails at once when Redis is down.
+const limitsRedis = createRedis({
+  url: env.REDIS_URL,
+  maxRetriesPerRequest: 1,
+  enableOfflineQueue: false,
+  commandTimeout: 1_000,
+  onError: (error) => logger.error("[redis] limiter connection", { error }),
+});
+
+app.use(
+  "/v1/*",
+  rateLimit<AppEnv>({
+    scope: "api",
+    store: redisWindowStore(limitsRedis, { timeoutMs: 500 }),
+    whenStoreFails: "allow",
+    logger,
+    limit: (c) => planOf(c.get("user")).requestsPerMinute,
+    windowMs: 60_000,
+    key: (c) => c.get("user").accountId,
+    refuse: (hit) => errors.rateLimit(hit.retryAfterSecs),
+  }),
+);
+```
+
+- **`whenStoreFails` is required for a store that can fail, and it has no default.** Say
+  `"allow"` for a limit that guards a promise, like a plan's requests per minute: refusing every
+  paying caller over a Redis blip trades a real outage for a limit nobody was hitting. Pass your
+  503 for one that guards a bill or a stranger's inbox, like a keyless demo or a form that sends
+  mail: `whenStoreFails: () => errors.unavailable("…")`. Either way the failure is written to
+  `logger`, with the scope and never the subject.
+- **Give it its own connection.** Three limiters in the fleet said "fails open" and hung instead,
+  because the connection `createRedis` makes by default waits for Redis to come back, and so did
+  every request behind them. `timeoutMs` is required as the backstop. The connection above fails
+  in a few milliseconds, so the backstop never runs.
+- One MULTI counts the request and re-arms the key's expiry, so no key outlives its window. Keys
+  start with `rl:`; pass `prefix` to change that.
+
+`hitWindow(store, key, { limit, windowMs })` is the same count without Hono, for a Worker, a job
+or an MCP tool. It answers `{ outcome, allowed, retryAfterSecs, … }` and never throws for a limit.
+
 ## A URL somebody else gave you
 
 A webhook endpoint, a link to read, an image to fetch: each is a customer telling your server to
