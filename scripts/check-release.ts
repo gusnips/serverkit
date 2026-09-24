@@ -29,7 +29,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const ROOT = join(fileURLToPath(import.meta.url), "..", "..");
-const PACKAGES = ["migrate", "server"];
+const PACKAGES = ["migrate", "sdkgen", "server"];
 
 /** The commands a bin dispatches to. Each one is run with `--help` from the unpacked tarball. */
 const COMMANDS: Record<string, string[]> = {

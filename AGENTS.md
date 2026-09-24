@@ -2,7 +2,7 @@ Entry point for AI agents working on this repo.
 
 # serverkit
 
-**The layer under a Bun or Node server on Postgres.** Two packages:
+**The layer under a Bun or Node server on Postgres.** Three packages:
 
 - **`@gusnips/migrate`** applies plain `.sql` files, writes TypeScript types from the live schema,
   and gives a stock Postgres in CI the roles and `auth` tables a Supabase database starts with.
@@ -16,6 +16,10 @@ Entry point for AI agents working on this repo.
   address it checked. The half of that guard a Worker can run is at the root. **No required peer.** `@gusnips/http` is used for its
   types and nothing else, so it erases and is optional; `hono`, `@supabase/supabase-js`, `pg` and
   `ioredis` are optional and reachable only behind their subpaths.
+- **`@gusnips/sdkgen`** is the part of an SDK generator that every copy wrote the same way: copying
+  the API's own declarations with their comments, writing a JSON Schema as a type, and writing the
+  files through the repo's prettier or checking them. The methods an SDK exposes stay in each
+  adopter's script, because those are the product.
 
 MIT · open source · npm scope `@gusnips`
 
@@ -47,6 +51,11 @@ serverkit/
 │   │   ├── bin/          ← one bin, gusnips-migrate, which dispatches its two commands
 │   │   └── test/         ← the throwaway-database helpers the tests share
 │   └── sql/              ← supabase-stand-in.sql, also exported for `psql -f`
+├── sdkgen/               ← @gusnips/sdkgen. One required peer: prettier.
+│   └── src/
+│       ├── contract.ts   ← liftContract(): the API's declarations, copied with their comments
+│       ├── types.ts      ← typeOf() and the field, comment and name writers; never a guess
+│       └── write.ts      ← writeGenerated(): the repo's prettier, then write or --check
 ├── server/               ← @gusnips/server. Each optional peer sits behind its own subpath.
 │   └── src/
 │       ├── errors.ts     ← AppError and createAppError(): your code→status map is the contract
@@ -816,6 +825,68 @@ Unhandled error event:", ...)` and returns — it never emits, so Node's throw i
     vendor-specific. `Retry-After` is documented on 409, 429 and 503, where this package's own code
     sends it, and not on 402, which no raise in the fleet sends it on. All 42 planted defects were
     caught, with a green control.
+
+### …and three for `@gusnips/sdkgen`
+
+Five backends each wrote an SDK generator, 426 to 616 lines each and 2,517 in all. The methods
+they write differ by product and stay home. What they share is the reader, the schema writer and
+the writer, and those came across with every copy's fixes merged.
+
+49. **A schema the writer does not understand throws. It never becomes `unknown`.** A wrong
+    `unknown` in a published SDK compiles for everyone who installs it and tells none of them. The
+    writer returns `unknown` only where the schema itself allows any value (`{}`, `true`, the
+    values of a bare `object`), and refuses `allOf`, `$ref` and anything else it would have to guess at. The
+    fixes were spread across the copies: `type: [..., "null"]` in three, `{}` and a record in two,
+    a boolean schema and a tuple in one. `typeNames` reads names inside a generic, where one copy
+    split on `|` and missed `JobDto` in `V1ListPage<JobDto>[]`.
+
+50. **The reader keeps every line where it was.** It blanks comments and strings to read the
+    structure, then copies the ORIGINAL lines, so the two texts must match line for line. All five
+    copies broke that, in four ways, and none had a test for any of them:
+    - an escape inside a string dropped its escaped character, or blanked it to a space, so a
+      backslash before a line break moved every later line up by one, and each later declaration
+      was copied from the wrong lines;
+    - an escape inside a `//` comment was honoured too, so a comment ending in `\` blanked the next
+      line. Run against one donor's rule, `// C:\` followed by a declaration returned only blanks.
+      Two copies guarded it with `state === state`, which is always true;
+    - `/*/` closed on the star that opened it;
+    - a braced block ended at a lone `}`, so `export interface Empty {}` on one line swallowed the
+      declaration after it.
+
+    Two merged fixes are also pinned, because each copy had only some of them: a property KEY is
+    not a reference (`VALIDATION_ERROR: 400` names no type), and `(typeof X)[number]` can be
+    written as its literal union.
+
+    **That second one is opt-in (`inlineTuples`), and the first adopter is why.** Only one copy
+    inlined, and the package first did it always. Rewriting a second backend's generator on the
+    package turned up two things. Its SDK does `export * from "./generated/contract.ts"`, so the
+    array is a published value there, and inlining it would remove it: a breaking change to an SDK
+    nobody meant to touch. And each member of that array carries its own doc comment, which a union
+    cannot hold. The same run found a bug in the package's own inliner. It read the members from
+    raw text, so the apostrophe in one member's comment (`the media's metadata`) opened a string.
+    The members came out as a sentence of prose, and the guard beside it had stripped strings
+    before comments, so the same apostrophe hid it from the guard too. Members are now read with
+    comments blanked and strings kept. An escape other than a quote or a backslash throws rather
+    than being read wrong: `"a\nb"` came out as `anb`. The copy that inlined read the tuple with
+    the TypeScript parser, which is right and costs a compiler dependency. This is the same answer
+    at the size of the one case that occurs.
+
+    `exportOnlyRoots` is the other half of that copy: only the names asked for stay exported, and
+    what they mention is written without `export`. One copy of five did it. It is an option rather
+    than an adapter, because `liftContract` returns one string, so a caller cannot tell afterwards
+    which declarations were roots.
+
+51. **The output goes through the repo's own prettier before it is compared.** The generated files
+    are checked in, so the generator's `--check` and `prettier --check` must never disagree about
+    one file. A file that cannot be read for a reason other than not existing throws rather than
+    reading as stale, because "stale" would send someone to regenerate over a permission error.
+
+    All 50 planted defects were caught, with a green control. Two backends' generators were
+    rewritten on the package and ran their own `--check` green, which means every generated file
+    came out byte for byte: 268 and 281 lines shorter. Each check was then shown failing on a file
+    with one line appended. zod converts through Standard JSON
+    Schema, as in `/openapi`, so zod is not a peer. Unlike `/openapi`, `unrepresentable: "any"`
+    is NOT passed: a type zod cannot describe must stop the generator, not become `{}`.
 
 ## What the build measured
 

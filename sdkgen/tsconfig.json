@@ -1,0 +1,12 @@
+{
+  "extends": "../tsconfig.base.json",
+  "compilerOptions": {
+    // Node, not the browser: this package runs in a build script and reads files. It must also
+    // run under plain `node`, which is why nothing here may reach for a `Bun.*` global.
+    "lib": ["ES2022"],
+    "types": ["node"],
+    "rootDir": "./src",
+    "noEmit": true
+  },
+  "include": ["src/**/*"]
+}

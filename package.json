@@ -8,13 +8,14 @@
   },
   "workspaces": [
     "migrate",
+    "sdkgen",
     "server"
   ],
   "scripts": {
     "build": "bun run --filter '*' build",
     "test": "bun run --filter '*' test",
     "typecheck": "bun run --filter '*' typecheck && tsc -p tsconfig.scripts.json",
-    "lint": "eslint migrate server scripts",
+    "lint": "eslint migrate sdkgen server scripts",
     "release:check": "bun run scripts/check-release.ts",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
