@@ -195,6 +195,14 @@ describe("redaction", () => {
     expect(line).not.toMatch(/hunter2|abc\.def/);
   });
 
+  it("hides a URL password whole when the password itself contains an @", () => {
+    // Greedy on purpose: a lazy match stops at the first @ and prints the rest of the password as
+    // if it were the host. A donor pinned this; a "tidier" pattern is how it would come back.
+    const { lines, write } = capture();
+    createLogger({ write }).error("connect to postgresql://app:first@second@db.test/app failed");
+    expect(lines[0]!.entry.message).toBe("connect to postgresql://[redacted]@db.test/app failed");
+  });
+
   it("adds the caller's rules to the defaults rather than replacing them", () => {
     const { lines, write } = capture();
     createLogger({
