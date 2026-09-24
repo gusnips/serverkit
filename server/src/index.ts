@@ -42,3 +42,5 @@ export {
   verifyWebhook,
 } from "./webhook.ts";
 export type { StandardWebhookHeaders, WebhookRefusalReason, WebhookVerdict } from "./webhook.ts";
+export { createSealer, SealError } from "./seal.ts";
+export type { Sealer, SealerOptions, SealErrorReason, SealKey } from "./seal.ts";

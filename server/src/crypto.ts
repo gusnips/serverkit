@@ -1,7 +1,7 @@
 /**
- * The pieces under webhook signatures: an HMAC, a comparison that does not leak, and the byte
- * encodings between them. Web Crypto only, so a Worker runs them as they are, and async wherever
- * Web Crypto is, because a Worker has no sync version of it.
+ * The pieces under webhook signatures and sealed secrets: an HMAC, a comparison that does not
+ * leak, and the byte encodings between them. Web Crypto only, so a Worker runs them as they are,
+ * and async wherever Web Crypto is, because a Worker has no sync version of it.
  */
 
 const encoder = new TextEncoder();
@@ -70,7 +70,17 @@ export function base64Of(bytes: Uint8Array): string {
   return btoa(binary);
 }
 
-/** Throws a `DOMException` on text that is not base64. */
-export function bytesOfBase64(text: string): Uint8Array {
+/** Throws a `DOMException` on text that is not base64. Padding may be left off. */
+export function bytesOfBase64(text: string): Uint8Array<ArrayBuffer> {
   return Uint8Array.from(atob(text), (char) => char.charCodeAt(0));
+}
+
+/** Base64 with `-` and `_`, and no padding: the form that sits in a URL or a column unescaped. */
+export function base64UrlOf(bytes: Uint8Array): string {
+  return base64Of(bytes).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+
+/** Reads base64url, and plain base64 too. Throws a `DOMException` on anything else. */
+export function bytesOfBase64Url(text: string): Uint8Array<ArrayBuffer> {
+  return bytesOfBase64(text.replace(/-/g, "+").replace(/_/g, "/"));
 }

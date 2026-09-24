@@ -12,6 +12,7 @@ import {
   checkUrlShape,
   clientIpOf,
   createAppError,
+  createSealer,
   hitWindow,
   hmacSha256,
   ipSubject,
@@ -324,5 +325,22 @@ describe("README — a webhook", () => {
     expect(safeEqual(header, expected)).toBe(true);
     expect(safeEqual("", "")).toBe(false);
     await expect(hmacSha256("", body, "hex")).rejects.toThrow();
+  });
+});
+
+describe("README — a secret you store", () => {
+  it("seals to a value that names its key, and opens it again", async () => {
+    const vault = createSealer({
+      current: "v1",
+      keys: { v1: Buffer.alloc(32, 3).toString("base64") },
+    });
+    const sealed = await vault.seal("refresh-token");
+    expect(sealed.startsWith("v1.")).toBe(true);
+    expect(await vault.open(sealed)).toBe("refresh-token");
+  });
+
+  it("refuses a key of the wrong length when the sealer is created", () => {
+    const short = Buffer.alloc(16, 3).toString("base64");
+    expect(() => createSealer({ current: "v1", keys: { v1: short } })).toThrow("must be 32 bytes");
   });
 });

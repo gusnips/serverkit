@@ -62,7 +62,8 @@ serverkit/
 │       ├── url-guard.ts  ← the SSRF check a Worker can run: address, URL shape, redirect, body cap
 │       ├── crypto.ts     ← safeEqual() and hmacSha256(), on Web Crypto so a Worker runs them
 │       ├── webhook.ts    ← sign and verify, in Stripe's one-header format and Standard Webhooks
-│       └── node/         ← the one directory allowed Node: fetchPublic() resolves once, dials pinned
+│       ├── seal.ts       ← createSealer(): AES-GCM for a secret you store, with a key id to rotate
+│       └── node/         ← the one directory allowed Node: fetchPublic(), and scryptSealKey()
 ├── scripts/
 │   └── check-release.ts  ← packs each package and checks what the registry would get
 └── AGENTS.md             ← this file
@@ -210,7 +211,7 @@ both Bun 1.3.8 and Node 22. It is the driver's, not the runner's, and `describeT
 brackets is still right for the guard. Someone on IPv6 loopback writes `localhost` or passes the
 host outside the URL.
 
-### …and seventeen for `@gusnips/server`
+### …and eighteen for `@gusnips/server`
 
 21. **A success builder returns an ANSWER, not a body — so on Hono, import the adapters.** `ok`,
     `created`, `paginated` and `noContent` in `responses.ts` answer `{ status, body }`, because the
@@ -540,6 +541,20 @@ Unhandled error event:", ...)` and returns — it never emits, so Node's throw i
     closed on Bun and open on Node (measured with the Stripe SDK the fleet pins). And a multibyte
     signature fails rather than throws: one copy compared string lengths and then bytes, which is a
     `RangeError` any stranger could raise.
+
+38. **A stored secret is sealed under a key id, with a 16-byte tag, and a key checked at boot.** Six
+    copies in four shapes, and none could rotate: each held one key, and two wrote `v1` in front of
+    every value and refused anything else. That `v1` is now a key id, so those two backends' rows
+    open unchanged (tested against their `node:crypto` code, in both directions), and a second key
+    is a rotation rather than a migration. Node accepts a GCM tag cut short unless it is told the
+    length, and one copy opened a value with a 4-byte tag (measured), so the sealer refuses any tag
+    but 16 bytes. An empty string seals and opens, where two copies threw. A key must decode to 32
+    bytes, checked when the sealer is made: four copies checked only that the variable was set, so a
+    one-letter key booted. Each key is imported once, where one copy ran scrypt on every call, at
+    least 67 ms of blocked event loop each on the path that handles every inbound message. The keys
+    sit in a `Map`, so a stored value naming its key `constructor` finds no key rather than
+    Object's. `scryptSealKey` is the one piece in `/node`, because Web Crypto has no scrypt on Node
+    or on Bun (measured).
 
 ## What the build measured
 

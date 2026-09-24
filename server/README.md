@@ -763,6 +763,42 @@ if (!safeEqual(c.req.header("x-hub-signature-256") ?? "", expected)) throw error
 `hmacSha256` throws on an empty key and `safeEqual` answers `false` when either side is empty, so
 an unset secret cannot let a request through.
 
+## A secret you store
+
+An OAuth token or a mailbox password in your database is one leaked backup away from being
+somebody else's. Seal it before you store it:
+
+```ts
+import { createSealer } from "@gusnips/server";
+
+const vault = createSealer({ current: "v1", keys: { v1: env.SEAL_KEY } });
+
+const sealed = await vault.seal(refreshToken); // "v1.Xq3…", safe to store
+await vault.open(sealed); // refreshToken
+```
+
+- **A key is 32 random bytes in base64.** Make one with `openssl rand -base64 32`. A key of any
+  other length is refused when the sealer is created, so a wrong one stops the boot instead of the
+  first sign-in.
+- **The `v1` at the front names the key.** To change keys, add the new one, point `current` at
+  it, seal the stored values again, then remove the old key. Until you remove it, both open.
+- **`open` throws a `SealError`**, whose `reason` is `malformed`, `unknown-key` or
+  `did-not-open`. The last one has two causes that encryption cannot tell apart: this process
+  holds a different key from the one that sealed the value, or the value was changed.
+- It is AES-256-GCM with a random 12-byte IV and a 16-byte tag, and it runs in a Worker.
+
+Rows sealed under a passphrase with Node's `scryptSync(passphrase, salt, 32)` open with the key
+`/node` derives the same way:
+
+```ts
+import { scryptSealKey } from "@gusnips/server/node";
+
+const vault = createSealer({
+  current: "v1",
+  keys: { v1: await scryptSealKey(env.CREDENTIALS_ENCRYPTION_KEY, "acme-credentials-v1") },
+});
+```
+
 ## What this package does not ship
 
 Each of these was measured, not assumed.

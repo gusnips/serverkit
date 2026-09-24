@@ -7,3 +7,4 @@ export type {
   Resolve,
   ResolveOptions,
 } from "./public-fetch.ts";
+export { scryptSealKey } from "./seal-key.ts";
