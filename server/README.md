@@ -267,10 +267,19 @@ before that, `routePath(c, -1)` silently ignores the `-1` and the request line n
 route.
 
 ```ts
-import { errorBoundary, errorHandler, notFoundHandler, requestLogger } from "@gusnips/server/hono";
+import {
+  apiSecureHeaders,
+  corsAllowList,
+  errorBoundary,
+  errorHandler,
+  notFoundHandler,
+  requestLogger,
+} from "@gusnips/server/hono";
 
 app.use(requestLogger({ logger })); // first, so it times and sees everything under it
-app.use(errorBoundary); // right after
+app.use(apiSecureHeaders()); // before errorBoundary, or a plain-object throw loses them
+app.use(corsAllowList([env.APP_URL, env.SITE_URL]));
+app.use(errorBoundary);
 app.onError(errorHandler({ errorResponse, logger }));
 app.notFound(notFoundHandler(errorResponse(errors.notFound("Route"))));
 ```
@@ -315,6 +324,45 @@ The request id goes back on `X-Request-ID`, on every answer including `onError`'
 `notFound`'s. A caller's own id is echoed only if it is 64 characters of `A-Z a-z 0-9 . _ -`,
 so the id in a line is always either the caller's or ours. Cross-origin, list that header in your
 CORS `exposeHeaders` or the browser hides it from the page.
+
+### The headers on every answer
+
+`apiSecureHeaders()` is Hono's `secureHeaders`, set for an API that answers JSON: HSTS for two
+years with `preload`, `X-Frame-Options: DENY`, and a CSP that loads nothing,
+`default-src 'none'; frame-ancestors 'none'`. For a route that serves a page, pass overrides. A CSP
+directive you add keeps the others.
+
+**Mount it before `errorBoundary`.** It writes its headers after the route has answered, and a
+throw that is not an `Error` skips that step in every middleware inside the boundary. Seven APIs
+in the fleet had it inside, so a plain-object throw answered 500 with none of the headers.
+
+Its `Cross-Origin-Resource-Policy: same-origin` does not block your web app. CORP applies to an
+`<img>` or a `<script>` from another origin. A `fetch` from your app is a CORS request.
+
+`corsAllowList(origins)` answers only the origins you list, compared exactly:
+
+- Each entry is reduced to its origin at boot. A blank entry is skipped, and anything that is not
+  an origin, such as `localhost:5173` or `*`, throws.
+- A page can always read `Retry-After` and `X-Request-ID`. A browser hides both unless CORS lists
+  them.
+- No `Access-Control-Allow-Credentials` unless you pass `credentials: true`. A Bearer token does
+  not need it. A client that sends `credentials: "include"` does.
+- A browser keeps a preflight for 10 minutes, where the default is 5 seconds.
+- `.has(origin)` gives the same answer, for a door that reads `Origin` itself, such as MCP.
+
+Under those, put every check that needs only the headers before Hono's `bodyLimit`. It reads a
+chunked body whole before the next middleware runs, so a refusal placed after it has already paid
+for the upload:
+
+```ts
+app.use("/v1/*", addressLimit); // rateLimit keyed on the client's address
+app.use("/v1/*", requireUser);
+app.use("/v1/*", bodyLimit({ maxSize: 1024 * 1024 })); // from hono/body-limit
+```
+
+A webhook's signature covers its body, so there `bodyLimit` goes right after the address limit.
+It hands on the same bytes it read, so the signature still verifies. And give `Bun.serve` a
+`maxRequestBodySize`: without one, Bun takes a body of up to 128 MiB (measured on 1.3.8 and 1.4.2).
 
 ### The guard check
 

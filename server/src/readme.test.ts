@@ -31,7 +31,9 @@ import {
   verifyWebhook,
 } from "./index.ts";
 import {
+  apiSecureHeaders,
   assertEveryRouteGuarded,
+  corsAllowList,
   errorBoundary,
   errorHandler,
   guard,
@@ -131,23 +133,28 @@ describe("the README", () => {
     expect(entry.error.stack).toContain("Error: invalid signature");
   });
 
-  it("mounts the four Hono pieces in the order the snippet mounts them", async () => {
+  it("mounts the Hono pieces in the order the snippet mounts them", async () => {
     // Mounted exactly as the README prints it, then made to throw a NON-Error — which is the
     // reason the README calls errorBoundary not optional. Without it Hono never reaches onError
     // and the request ends with no answer at all.
     const logger = createLogger({ level: "silent" });
+    const env = { APP_URL: "https://app.example.com", SITE_URL: "https://example.com" };
     const app = new Hono<{ Variables: RequestVariables<ErrorCode> }>();
     app.use(requestLogger({ logger }));
+    app.use(apiSecureHeaders());
+    app.use(corsAllowList([env.APP_URL, env.SITE_URL]));
     app.use(errorBoundary);
     app.onError(errorHandler({ errorResponse, logger }));
     app.notFound(notFoundHandler(errorResponse(errors.notFound("Route"))));
     // A rejection with a plain object, which is the case the boundary exists for.
     app.get("/boom", () => Promise.reject({ code: "PGRST301", payload: "the whole body" }));
 
-    const boom = await app.request("/boom");
+    const boom = await app.request("/boom", { headers: { Origin: env.APP_URL } });
     const missing = await app.request("/nope");
 
     expect(boom.status).toBe(500);
+    expect(boom.headers.get("X-Content-Type-Options")).toBe("nosniff");
+    expect(boom.headers.get("Access-Control-Allow-Origin")).toBe(env.APP_URL);
     expect(await boom.text()).not.toContain("the whole body");
     expect(boom.headers.get("X-Request-ID")).toMatch(/^[A-Za-z0-9._-]{1,64}$/);
     expect(missing.status).toBe(404);

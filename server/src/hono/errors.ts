@@ -21,7 +21,9 @@ type CodeOf<E extends ErrorEnv> = NonNullable<E["Variables"]["errorCode"]>;
  * reports it as a CORS failure — which sends whoever reads it to the wrong layer. A PostgREST
  * client rejects with plain objects, so this is not hypothetical. The original rides as `cause`.
  *
- * Mount it right after `requestLogger`.
+ * Mount it after `requestLogger`, `apiSecureHeaders` and `corsAllowList`. A middleware inside the
+ * boundary that writes headers once the route has answered, as `secureHeaders` does, never gets to
+ * write them for a throw that is not an `Error`.
  */
 export const errorBoundary: MiddlewareHandler = async (_c, next) => {
   try {

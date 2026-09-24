@@ -2,6 +2,8 @@
  * `@gusnips/server/hono`: the package mounted on a Hono app.
  *
  *     app.use(requestLogger({ logger }));
+ *     app.use(apiSecureHeaders()); // before errorBoundary, or a plain-object throw loses them
+ *     app.use(corsAllowList([env.APP_URL]));
  *     app.use(errorBoundary);
  *     app.onError(errorHandler({ errorResponse, logger }));
  *     app.notFound(notFoundHandler(errorResponse(errors.notFound("Route"))));
@@ -25,3 +27,5 @@ export { rateLimit } from "./rate-limit.ts";
 export type { RateLimitOptions } from "./rate-limit.ts";
 export { requestLogger } from "./request-logger.ts";
 export type { RequestLoggerOptions, RequestVariables } from "./request-logger.ts";
+export { apiSecureHeaders, corsAllowList } from "./headers.ts";
+export type { CorsAllowListOptions } from "./headers.ts";

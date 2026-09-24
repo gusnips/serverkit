@@ -52,7 +52,7 @@ serverkit/
 │       ├── errors.ts     ← AppError and createAppError(): your code→status map is the contract
 │       ├── responses.ts  ← the envelope both ways: ok/created/paginated, and createErrorResponse
 │       ├── logger/       ← createLogger() and the serializer that decides what a log line keeps
-│       ├── hono/         ← the edge: errorBoundary, errorHandler, guards, and the four adapters
+│       ├── hono/         ← the edge: errorBoundary, guards, headers, CORS and the four adapters
 │       ├── supabase/     ← isAuthOutage(): did auth say no, or fail to answer?
 │       ├── pg/           ← createPgPool(): the wait is bounded, the idle handler is required
 │       ├── redis/        ← createRedis(), the bounded probes, and the rate-limit window store
@@ -213,7 +213,7 @@ both Bun 1.3.8 and Node 22. It is the driver's, not the runner's, and `describeT
 brackets is still right for the guard. Someone on IPv6 loopback writes `localhost` or passes the
 host outside the URL.
 
-### …and twenty for `@gusnips/server`
+### …and twenty-one for `@gusnips/server`
 
 21. **A success builder returns an ANSWER, not a body — so on Hono, import the adapters.** `ok`,
     `created`, `paginated` and `noContent` in `responses.ts` answer `{ status, body }`, because the
@@ -578,9 +578,9 @@ Unhandled error event:", ...)` and returns — it never emits, so Node's throw i
     restarts. One said a value must never reach the message, because a connection URL carries a
     password, and the kit's messages hold names and lengths only. None of the twelve refused the
     value its own `.env.example` ships. The shapes were measured on the secret lines of every
-    `.env.example` the fleet commits: `your-…` (also behind a vendor prefix, `sk-your-…`), `<…>`, `…-xxx`,
-    `generate-…`, `change-me` and `dev-only`. A length floor does not catch them: the `JWT_SECRET`
-    two repos carry in their self-hosted Supabase example is
+    `.env.example` the fleet commits: `your-…` (also behind a vendor prefix, `sk-your-…`), `<…>`,
+    `…-xxx`, `generate-…`, `change-me` and `dev-only`. A length floor does not catch them: the
+    `JWT_SECRET` two repos carry in their self-hosted Supabase example is
     `your-super-secret-jwt-token-with-at-least-32-characters`, 55 characters written to pass the
     floor it is checked against, and one repo's example key passes that repo's own 32-character
     floor. So `secrets` refuses the shape before it measures the length. Only keys named as secrets
@@ -588,6 +588,24 @@ Unhandled error event:", ...)` and returns — it never emits, so Node's throw i
     `EMAIL_FROM` holds words and brackets by design. The source is an argument, because a Worker has
     no `process.env`, and a Worker binding counts as set. Nothing turns the check off: one copy
     returned early under `NODE_ENV=test`.
+
+41. **An API's headers go on outside `errorBoundary`, and CORS compares whole origins.** Seven Hono
+    APIs pasted one `secureHeaders` option set word for word, and all seven mounted it inside
+    `errorBoundary`. `secureHeaders` writes after `next()`, and a throw that is not an `Error` skips
+    that step in every middleware between the throw and the boundary, so a plain-object throw (a
+    PostgREST rejection) answered 500 with no HSTS, `nosniff` or CSP (tested in both orders).
+    `errorBoundary`'s own doc said to mount it right after `requestLogger`, which is the order that
+    loses them; it now names what goes before it. CORS headers survive either order, because `cors`
+    sets them before `next()` and Hono copies them onto the answer, so the reason two APIs gave for
+    mounting CORS first does not hold on hono 4.13.8. `corsAllowList` compares whole origins, where
+    one API matched with `endsWith` and `includes` and let in any site on `pages.dev` (measured). An
+    entry that is not an origin throws at boot, and so does one with an opaque origin: that origin
+    is the string "null", and allowing it allows every sandboxed iframe. `Retry-After` and
+    `X-Request-ID` are always exposed, because a browser hides both from the page otherwise.
+    Credentials are off, because no Hono API in the fleet sets a cookie. A preflight is kept 600
+    seconds, where the Fetch spec's default is 5. `bodyLimit` needs no wrapper, but it reads a
+    chunked body whole before `next()`, so the README puts every check that needs only headers in
+    front of it. Bun's default body cap is 128 MiB on 1.3.8 and on 1.4.2 (measured).
 
 ## What the build measured
 
