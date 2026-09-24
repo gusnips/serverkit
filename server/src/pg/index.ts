@@ -128,3 +128,6 @@ export async function pingPool(
     clearTimeout(timer);
   }
 }
+
+export { createIdempotency } from "./idempotency.ts";
+export type { IdempotencyOptions, IdempotencyScope, IdempotentOutcome } from "./idempotency.ts";

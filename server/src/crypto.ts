@@ -65,6 +65,11 @@ export async function hmacBytes(key: string | Uint8Array, message: string): Prom
   return new Uint8Array(await crypto.subtle.sign("HMAC", imported, encoder.encode(message)));
 }
 
+/** SHA-256 of a string's UTF-8 bytes, as hex. */
+export async function sha256Hex(text: string): Promise<string> {
+  return hexOf(new Uint8Array(await crypto.subtle.digest("SHA-256", encoder.encode(text))));
+}
+
 function hexOf(bytes: Uint8Array): string {
   return Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
 }

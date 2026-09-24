@@ -24,7 +24,7 @@ export async function startRedisServer(): Promise<{ url: string; stop: () => voi
   return { url, stop: () => server.kill() };
 }
 
-function freePort(): Promise<number> {
+export function freePort(): Promise<number> {
   return new Promise((resolve, reject) => {
     const probe = createServer();
     probe.once("error", reject);

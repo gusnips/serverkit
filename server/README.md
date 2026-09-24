@@ -477,6 +477,67 @@ connection URL, so spread it in beside `connectionString`.
 `pg` is an optional peer, behind the `/pg` subpath, so importing `@gusnips/server` never
 installs it.
 
+### A retry that does not run twice
+
+A client that timed out on a write cannot tell whether the write happened. If it sends a key of
+its own, `Idempotency-Key: 5f0c…`, the retry gets the first answer back instead of sending a
+second message or charging a second time. Add the table in a migration:
+
+```sql
+CREATE TABLE app.idempotency_keys (
+  owner text NOT NULL,
+  key_hash text NOT NULL,
+  fingerprint text NOT NULL,
+  lease uuid NOT NULL,
+  answer json,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (owner, key_hash)
+);
+CREATE INDEX idempotency_keys_created_at_idx ON app.idempotency_keys (created_at);
+```
+
+Then run each write through it:
+
+```ts
+import { createIdempotency } from "@gusnips/server/pg";
+
+const idempotency = createIdempotency(pool, {
+  table: "app.idempotency_keys",
+  onError: (error) => logger.error("idempotency store failed", { error }),
+});
+
+const outcome = await idempotency.run(
+  { owner: workspaceId, operation: "send_message", key: c.req.header("idempotency-key") },
+  input,
+  () => sendMessage(input),
+);
+if (outcome.kind === "running")
+  throw errors.conflict("A request with this key is still running", { retryAfterSecs: 2 });
+if (outcome.kind === "mismatch")
+  throw errors.keyReused("This key was already used for a different request. Send a new one.");
+return c.json(created(outcome.answer), 201);
+```
+
+- **With no key, it just runs.** Nothing is stored.
+- **A key that is still running answers 409, with a wait.** Waiting fixes it.
+- **A key used for other input or another operation answers 422**, as the IETF
+  `Idempotency-Key` draft says. Waiting never fixes it, so it must not share a status with the
+  409 a client is meant to retry.
+- **Check who may call the operation before `run`.** A replay hands back a stored answer, and
+  it must never reach a caller who could not get it now.
+- **A throw lets the key go**, so a retry with the same key runs again.
+- **A failed save still answers.** The work happened, so `onError` gets the failure and the
+  client gets its answer. Its retries see "running" until `abandonedSecs` passes, then run again.
+  That is the one path that can still run twice, which is why `onError` is required.
+- **A claim nobody answered is taken over after 15 minutes** (`abandonedSecs`), because the
+  process that made it died. Set it well past your slowest operation.
+- **An MCP door takes the key as an argument.** A tool call has no headers of its own, so add an
+  optional `idempotencyKey` to the tool's input schema and pass it as `key`.
+- **Delete old answers** once an hour or once a night: `await idempotency.prune()`.
+
+`owner` can be a `uuid` column that references your workspaces, if you want a deleted
+workspace's keys to go with it.
+
 ## Redis
 
 If your API uses Redis — for BullMQ, for rate-limit windows, for a cache — the connection and
@@ -1263,6 +1324,8 @@ Each of these was measured, not assumed.
 - An MCP tool handler never throws, and a tool's `.shape` does not compile.
 - A webhook delivery never retries a 4xx or a redirect, and never comes back sooner than
   `Retry-After` asks, up to an hour.
+- An idempotency key reused for a different request is refused, never replayed, and a failed save
+  never fails a write that happened.
 
 ## Develop
 
@@ -1270,3 +1333,6 @@ Each of these was measured, not assumed.
 bun install
 cd server && bun run test
 ```
+
+The Redis and Postgres tests start their own throwaway server, so they need `redis-server` and
+`initdb` installed. Without them, those tests are skipped and marked as skipped.

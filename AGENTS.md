@@ -54,7 +54,7 @@ serverkit/
 │       ├── logger/       ← createLogger() and the serializer that decides what a log line keeps
 │       ├── hono/         ← the edge: errorBoundary, guards, headers, CORS and the four adapters
 │       ├── supabase/     ← isAuthOutage(): did auth say no, or fail to answer?
-│       ├── pg/           ← createPgPool(): the wait is bounded, the idle handler is required
+│       ├── pg/           ← createPgPool() with a bounded wait; createIdempotency(), the key replay
 │       ├── redis/        ← createRedis(), the bounded probes, and the rate-limit window store
 │       ├── bullmq/       ← queues that delete finished jobs, the dead letter, the schedule sync
 │       ├── mcp/          ← the MCP door: tools that never throw, a limit per call, POST only
@@ -91,8 +91,10 @@ bun run release:check        # what the REGISTRY would get: pack, unpack, run un
 bun run format
 ```
 
-`@gusnips/server` has no database and no server in its tests: they drive a real Hono app and read
-the bytes back. `migrate`'s are integration tests against a real Postgres. Each creates its own
+`@gusnips/server`'s tests drive a real Hono app and read the bytes back. Its Redis and Postgres
+suites start a throwaway server of their own on a free loopback port, and skip, saying so, where
+`redis-server` or `initdb` is not installed. A cluster of its own rather than a URL, so no server
+test can reach a database somebody cares about. `migrate`'s are integration tests against a real Postgres. Each creates its own
 database and drops it after. `TEST_DATABASE_URL` must be on this machine; `test/db.ts` refuses anything else, because the
 tests create roles, drop databases and end sessions. Roles belong to the whole cluster, so
 `test/global-setup.ts` creates them once before the files run in parallel.
@@ -219,7 +221,7 @@ both Bun 1.3.8 and Node 22. It is the driver's, not the runner's, and `describeT
 brackets is still right for the guard. Someone on IPv6 loopback writes `localhost` or passes the
 host outside the URL.
 
-### …and twenty-six for `@gusnips/server`
+### …and twenty-seven for `@gusnips/server`
 
 21. **A success builder returns an ANSWER, not a body — so on Hono, import the adapters.** `ok`,
     `created`, `paginated` and `noContent` in `responses.ts` answer `{ status, body }`, because the
@@ -747,6 +749,40 @@ Unhandled error event:", ...)` and returns — it never emits, so Node's throw i
     ladder's wait is the floor, so a malformed or past `Retry-After` reads the same whether it
     comes out `undefined`, 0 or negative, and `Headers` already trims the value. The sign rule, the
     clamp and the trim went. The survivors were not gaps in the tests.
+
+47. **A write with a key runs once, a claim nobody answered is taken over, and a late run cannot
+    touch the claim that replaced it.** Two backends wrote the replay in the same week, and each
+    was blind where the other could see. One kept a dead claim "running" until the daily prune, so
+    one deploy mid-request answered every retry with 409 for up to 24 hours, and its own SDK, which
+    reuses one key across retries, was the caller that got stuck. It answered a failed save with a
+    5xx, the answer a client retries, on the key it had just left claimed. And its MCP door took no
+    key, because a tool call has no headers. The other took a dead claim over after 15 minutes and
+    survived a failed save, but hashed `JSON.stringify` of its parsed input, which is stable only
+    while the validator writes keys in schema order. `createIdempotency` is both, plus two things
+    neither had.
+
+    **The lease.** Taking a claim over starts a second run while the first may still be going.
+    Without a lease, the first run's late save overwrites the second run's answer, and its late
+    failure deletes the second run's claim: the copy that took claims over released
+    `WHERE answer IS NULL`, and the new claim matches that too. Both are pinned by planted defects.
+
+    **A `Date` fingerprinted as `{}`.** The canonical copy sorted keys by walking objects, which
+    never calls `toJSON`, so every `Date` became `{}`, and two requests that differ only in a date
+    read as one. Latent there, because none of its operations parses a date today. A
+    `JSON.stringify` replacer sees each value after `toJSON`, so the fix is also shorter.
+
+    **A reused key answers 422, as the IETF `Idempotency-Key` draft says.** The two copies
+    answered 409 and 400. 409 is already "still running", and a client must retry that one and
+    never this one. 400 says the request could not be read, and it could. The package ships no
+    codes, so the README names the status.
+
+    Measured on Postgres 18: `jsonb` reorders an object's keys and keeps only the last of two
+    duplicates, so the answer column is `json`. node-postgres parses a stored JSON `null` to
+    `null`, so "no answer yet" is read as `answer IS NULL` in SQL. Read in JS, a run that answered
+    `null` stays "running" until it is taken over and run again. The key is stored hashed, so it
+    needs no length limit and a long key is not a 400. The test for that uses a random key: a
+    repeated character compresses small enough to fit the index unhashed, so the first version of
+    the test passed with the hashing removed.
 
 ## What the build measured
 
