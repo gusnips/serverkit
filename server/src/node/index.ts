@@ -8,3 +8,5 @@ export type {
   ResolveOptions,
 } from "./public-fetch.ts";
 export { scryptSealKey } from "./seal-key.ts";
+export { bunServerStep, createShutdown, installProcessHandlers } from "./shutdown.ts";
+export type { ProcessHandlerOptions, Shutdown, ShutdownOptions, ShutdownStep } from "./shutdown.ts";

@@ -65,7 +65,7 @@ serverkit/
 │       ├── seal.ts       ← createSealer(): AES-GCM for a secret you store, with a key id to rotate
 │       ├── token.ts      ← signToken() and verifyToken(): a link that proves who it is for
 │       ├── env.ts        ← validateEnv(): every problem with the environment, in one error
-│       └── node/         ← the one directory allowed Node: fetchPublic(), and scryptSealKey()
+│       └── node/         ← the one directory allowed Node: fetchPublic(), scryptSealKey() and the drain
 ├── scripts/
 │   └── check-release.ts  ← packs each package and checks what the registry would get
 └── AGENTS.md             ← this file
@@ -213,7 +213,7 @@ both Bun 1.3.8 and Node 22. It is the driver's, not the runner's, and `describeT
 brackets is still right for the guard. Someone on IPv6 loopback writes `localhost` or passes the
 host outside the URL.
 
-### …and twenty-one for `@gusnips/server`
+### …and twenty-two for `@gusnips/server`
 
 21. **A success builder returns an ANSWER, not a body — so on Hono, import the adapters.** `ok`,
     `created`, `paginated` and `noContent` in `responses.ts` answer `{ status, body }`, because the
@@ -616,6 +616,26 @@ Unhandled error event:", ...)` and returns — it never emits, so Node's throw i
     seconds, where the Fetch spec's default is 5. `bodyLimit` needs no wrapper, but it reads a
     chunked body whole before `next()`, so the README puts every check that needs only headers in
     front of it. Bun's default body cap is 128 MiB on 1.3.8 and on 1.4.2 (measured).
+
+42. **A drain runs once, in the order it is given, under a backstop that holds the process open.**
+    Thirteen hand-written drains had four defects between them: a worker that always exited 0,
+    ten APIs that ran the whole sequence again on a second signal (pg-pool's `end()` then
+    rejects), backstops shorter than the work they drained, and a cron nobody could stop. Every
+    copy `unref`'d its backstop, and that is a fifth, which none of them knew: when a step hangs
+    holding no socket, an unref'd timer lets the process exit 0 in the middle of the drain with
+    nothing logged (measured on Node 22, Bun 1.3.8 and Bun 1.4.2). The sequence always ends in
+    `exit`, so a live timer keeps nothing alive for longer, and the backstop names the step it
+    caught. Bun's `stop()` never resolves while an SSE client is attached, which is why
+    `bunServerStep` bounds it; Bun 1.3.8's `stop(true)` does not close that connection either
+    (curl still connected 20 seconds later, measured; 1.4.2 closes it at once), so the forced
+    stop is bounded too and the steps after it still run. `rejections` is required, because the
+    fleet uses both answers on purpose, and a rejection listener is installed for both: on Bun a
+    rejection with only an `uncaughtException` listener exits 1 at once, skipping the drain,
+    where Node hands it to that listener (measured on 1.3.8 and 1.4.2). An uncaught exception
+    drains and exits 1 rather than exiting at once, because the backstop already bounds a drain
+    the bug has broken. A second signal exits 1 at once: a process manager sends one and then
+    SIGKILL, so the second comes from a person. The budget check stays in the adopter, because
+    only the adopter can read its process manager's config; the README gives the order.
 
 ## What the build measured
 

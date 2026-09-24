@@ -917,6 +917,50 @@ Copy apps/api/.env.example to apps/api/.env and fill it in.
 - **`check`** adds your own rules to the same list. Return a line per problem, with no value in it.
 - In a Worker, pass its `env`. `envProblems` returns the same list without throwing, for a test.
 
+## Stopping for a deploy
+
+A process manager stops your process with a signal, and kills it when its timeout runs out. In
+between, finish the work in flight and close what it used, in order:
+
+```ts
+import { bunServerStep, createShutdown, installProcessHandlers } from "@gusnips/server/node";
+
+const shutdown = createShutdown(
+  [
+    bunServerStep(server, { graceMs: 5_000 }),
+    { name: "redis", run: () => redis.quit() },
+    { name: "postgres", run: () => pool.end() },
+  ],
+  { hardExitMs: 25_000, logger },
+);
+installProcessHandlers(shutdown, { logger, rejections: "survive" });
+```
+
+- **The steps run once, in the order you list them.** Stop taking work first. Close the database
+  last, because a request that is still finishing may still query it.
+- **A failed step does not stop the rest**, and the process then exits 1, so your process manager
+  knows the drain failed.
+- **`hardExitMs` bounds the whole drain.** When it runs out, the log names the step that hung and
+  the process exits 1.
+- **`bunServerStep`** stops taking connections at once and gives the requests in flight `graceMs`
+  to finish. An SSE stream never finishes on its own, so after that the step closes what is left.
+- **`installProcessHandlers`** drains on SIGTERM, on SIGINT (what pm2 sends) and on an uncaught
+  exception, and logs every crash through your logger. A second signal exits 1 at once.
+- **`rejections` is required.** `"survive"` logs a rejected promise nobody handled and keeps
+  going, for an API whose requests share nothing. `"exit"` logs it and drains, for a worker, where
+  a job that stopped halfway may have left bad state.
+
+Each of these numbers must be larger than the one before it:
+
+1. The longest request you let finish, or in a worker the longest job.
+2. `hardExitMs`. On Bun 1.3.8, `bunServerStep` can take `graceMs` twice while a stream is open.
+3. Your process manager's kill timeout. pm2's `kill_timeout` is 1.6 seconds unless you set it.
+4. When pm2 runs under systemd, the unit's `TimeoutStopSec`.
+
+Check the order in a test that reads the numbers from your config files. One API had a 25-second
+`hardExitMs` under a 70-second kill timeout, raised for requests that run up to 60 seconds, so
+every deploy cut those requests off at 25.
+
 ## What this package does not ship
 
 Each of these was measured, not assumed.
@@ -943,6 +987,7 @@ Each of these was measured, not assumed.
 - A code outside your map, or a message key outside your union, does not compile.
 - A webhook checked while no secret is set is refused, never passed.
 - A secret still set to its `.env.example` placeholder stops the boot.
+- A drain that hangs exits 1, never 0.
 
 ## Develop
 
