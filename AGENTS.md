@@ -64,6 +64,7 @@ serverkit/
 │       ├── url-guard.ts  ← the SSRF check a Worker can run: address, URL shape, redirect, body cap
 │       ├── crypto.ts     ← safeEqual() and hmacSha256(), on Web Crypto so a Worker runs them
 │       ├── webhook.ts    ← sign and verify, in Stripe's one-header format and Standard Webhooks
+│       ├── webhook-delivery.ts ← nextDeliveryStep(): delivered, retry in N seconds, or stop
 │       ├── seal.ts       ← createSealer(): AES-GCM for a secret you store, with a key id to rotate
 │       ├── token.ts      ← signToken() and verifyToken(): a link that proves who it is for
 │       ├── unsubscribe.ts← listUnsubscribeHeaders(): both one-click headers, for any sender
@@ -218,7 +219,7 @@ both Bun 1.3.8 and Node 22. It is the driver's, not the runner's, and `describeT
 brackets is still right for the guard. Someone on IPv6 loopback writes `localhost` or passes the
 host outside the URL.
 
-### …and twenty-five for `@gusnips/server`
+### …and twenty-six for `@gusnips/server`
 
 21. **A success builder returns an ANSWER, not a body — so on Hono, import the adapters.** `ok`,
     `created`, `paginated` and `noContent` in `responses.ts` answer `{ status, body }`, because the
@@ -719,6 +720,33 @@ Unhandled error event:", ...)` and returns — it never emits, so Node's throw i
     member and refuses the rest, which is exactly the loop four doors write. `run` is a method, so
     it is compared both ways, and `{ id: string }` stands where `unknown` is asked for with no cast,
     also from an app's own operation type whose `run` is a property (tested).
+
+46. **A webhook sender retries what waiting can fix, believes `Retry-After`, and counts on the
+    row.** Seven senders, three lineages, and the decision after an attempt was different in each.
+    Six retried every 4xx, and no sender read `Retry-After`. Redirects were handled three ways.
+    The ladders were a list, five doublings (one from 5 s that gave up after about 15), and one
+    flat 30 s, by accident, that gave up about two minutes into an outage. `nextDeliveryStep` makes
+    408, 425, 429, 5xx and no answer a retry, a 3xx or any other 4xx final, and takes the larger of
+    the ladder's wait and the receiver's, capped at an hour. A cap rather than a refusal, unlike
+    the client's rule: nobody is waiting on a spinner here, and an attempt that lands early costs
+    one request where giving up loses the event.
+
+    **The attempt number is an argument, because the queue's own count lies.** Honouring a
+    `Retry-After` means delaying the job by hand, and measured on BullMQ 5.81.5 a job moved with
+    `moveToDelayed` and `DelayedError` keeps `attemptsMade` at 0 on every run, so
+    `attemptsMade + 1` would say "first attempt" forever. One sender already counts on its
+    delivery row, and the README says to.
+
+    **The breaker is a statement in the README, not code**, because the fleet reaches Postgres
+    through two clients, and supabase-js cannot add one to a column. Measured on Postgres 18 with
+    20 failures at once and a limit of 10: the one statement tripped once and counted 10. The
+    read-then-write two senders use kept 1 of the 20 and never tripped. It counts `failed` steps
+    only, so an event being retried does not spend the endpoint's allowance.
+
+    Two planted defects survived the first suite, and both were code that could not matter. The
+    ladder's wait is the floor, so a malformed or past `Retry-After` reads the same whether it
+    comes out `undefined`, 0 or negative, and `Headers` already trims the value. The sign rule, the
+    clamp and the trim went. The survivors were not gaps in the tests.
 
 ## What the build measured
 

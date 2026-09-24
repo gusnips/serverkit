@@ -882,6 +882,63 @@ if (!safeEqual(c.req.header("x-hub-signature-256") ?? "", expected)) throw error
 `hmacSha256` throws on an empty key and `safeEqual` answers `false` when either side is empty, so
 an unset secret cannot let a request through.
 
+### Sending one, and trying again
+
+```ts
+import { nextDeliveryStep } from "@gusnips/server";
+
+const step = nextDeliveryStep(response, delivery.attempts + 1);
+// → { outcome: "retry", afterSecs: 60 }
+```
+
+`response` is what the receiver answered, or `null` when nothing came back: a refused connection, a
+timeout, or DNS failing. The second argument is the attempt that just ran, counting from 1.
+
+| The receiver answered            | The step                                                       |
+| -------------------------------- | -------------------------------------------------------------- |
+| 2xx                              | `delivered`                                                    |
+| 408, 425, 429, 5xx, or no answer | `retry` after `afterSecs`, until the fifth attempt `exhausted` |
+| 3xx                              | `failed`, `reason: "redirected"`                               |
+| any other 4xx                    | `failed`, `reason: "refused"`                                  |
+
+- **A 4xx is final.** The receiver's code answered on purpose, and the same body gets the same
+  answer. Six of seven senders tried it again. What this gives up is a 404 while their
+  deploy swaps routes, which is rarer than a 502 and shows in the delivery log.
+- **A redirect is final.** A webhook follows none, because the new address was never checked, so
+  the next attempt would get the same redirect. Ask the customer to register the final URL.
+- **The wait doubles from 30 seconds**: 30, 60, 120 and 240, then the fifth attempt is the last.
+  `{ attempts, baseSecs, maxWaitSecs }` in the third argument changes that.
+- **A `Retry-After` longer than the ladder's wait is believed**, in seconds or as a date. No
+  sender read it before. It is capped at an hour (`maxWaitSecs`), so a receiver asking for three
+  hours gets an attempt each hour instead of being given up on.
+- **Schedule the retry with `afterSecs`, not with your queue's own backoff**, or the two disagree
+  and the row's "next attempt" is wrong. In BullMQ, delay the job by hand:
+  `await job.moveToDelayed(Date.now() + step.afterSecs * 1000, token); throw new DelayedError();`.
+- **Keep the attempt count on the delivery row.** A job delayed by hand keeps `attemptsMade` at 0
+  (measured on BullMQ 5.81.5), so `job.attemptsMade + 1` would say "first attempt" forever and the
+  delivery would never stop.
+
+**A breaker counts deliveries that failed for good, never attempts.** A receiver down for ten
+minutes should not use up ten failures on one event while it is still being retried. So count a
+`failed` step, and turn the endpoint off in one statement:
+
+```sql
+-- $1 is the endpoint, $2 how many failures in a row turn it off
+UPDATE webhook_endpoints
+   SET consecutive_failures = consecutive_failures + 1,
+       enabled = consecutive_failures + 1 < $2
+ WHERE id = $1 AND enabled
+RETURNING NOT enabled AS tripped
+```
+
+`tripped` is true for exactly one failure, so the mail saying "we turned your endpoint off" goes
+once. Measured on Postgres 18 with 20 failures at once and a limit of 10: one trip, with the count
+at 10. Reading the count and then writing it, as two senders do, kept 1 of the 20 and never tripped.
+A `delivered` step resets it:
+`UPDATE webhook_endpoints SET consecutive_failures = 0 WHERE id = $1 AND consecutive_failures > 0`.
+With supabase-js, put the statement in a Postgres function and call it with `.rpc()`, because
+`.update()` cannot add one to a column.
+
 ## A secret you store
 
 An OAuth token or a mailbox password in your database is one leaked backup away from being
@@ -1204,6 +1261,8 @@ Each of these was measured, not assumed.
 - A mail without a text part is refused.
 - A mail login is never sent over a connection without TLS.
 - An MCP tool handler never throws, and a tool's `.shape` does not compile.
+- A webhook delivery never retries a 4xx or a redirect, and never comes back sooner than
+  `Retry-After` asks, up to an hour.
 
 ## Develop
 

@@ -23,6 +23,7 @@ import {
   createErrorResponse,
   createLogger,
   memoryWindowStore,
+  nextDeliveryStep,
   nextHop,
   ok,
   paginated,
@@ -340,6 +341,17 @@ describe("README — a webhook", () => {
     expect(safeEqual(header, expected)).toBe(true);
     expect(safeEqual("", "")).toBe(false);
     await expect(hmacSha256("", body, "hex")).rejects.toThrow();
+  });
+});
+
+describe("README — sending a webhook, and trying again", () => {
+  it("answers the second failed attempt with a 60-second wait, from a real Response", () => {
+    const delivery = { attempts: 1 };
+    const response = new Response("down", { status: 503 });
+    expect(nextDeliveryStep(response, delivery.attempts + 1)).toEqual({
+      outcome: "retry",
+      afterSecs: 60,
+    });
   });
 });
 
