@@ -77,9 +77,14 @@ const REDACTED = "[redacted]";
  * to log whole, like a request's headers. Matching at the END of the key keeps all 11 and still
  * catches `authorization`, `set-cookie`, `newPassword`, `clientSecret`, `accessToken`,
  * `x-api-key` and `secretAccessKey`.
+ *
+ * A plural is caught too, except `token`'s. Anchoring at the end is what let `freeApiKeys`, an
+ * array of real provider keys in one backend, slip past where the match-anywhere rule had caught
+ * it. And a `…Tokens` key in the fleet's logs is always a count (`inputTokens`, `maxTokens`), so
+ * that one plural stays out.
  */
 const SECRET_KEY =
-  /(?:authorization|cookies?|password|secret|token|(?:api|access|secret|private)[_-]?key)$/i;
+  /(?:authorization|cookies?|passwords?|secrets?|token|(?:api|access|secret|private)[_-]?keys?)$/i;
 
 /** Patterns replaced in every string. Both are credentials wherever they appear. */
 const SECRET_VALUES: ReadonlyArray<readonly [RegExp, string]> = [

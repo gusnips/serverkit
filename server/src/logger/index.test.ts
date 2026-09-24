@@ -170,6 +170,22 @@ describe("redaction", () => {
     });
   });
 
+  it("hides a plural that holds secrets, and keeps the one plural that counts them", () => {
+    const { lines, write } = capture();
+    createLogger({ write }).info("embedder ready", {
+      freeApiKeys: ["k1", "k2"],
+      secrets: { a: "s1" },
+      passwords: ["p1"],
+      outputTokens: 7,
+    });
+    expect(lines[0]!.entry).toMatchObject({
+      freeApiKeys: "[redacted]",
+      secrets: "[redacted]",
+      passwords: "[redacted]",
+      outputTokens: 7,
+    });
+  });
+
   it("keeps a key that only contains the word, because those are the fleet's real fields", () => {
     // Every one of these is logged today, and a match anywhere in the key hid all of them.
     const meta = {

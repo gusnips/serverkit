@@ -309,6 +309,14 @@ host outside the URL.
     with `search`, because `test` on a `g` pattern resumes from `lastIndex` and prints the next
     key.
 
+    **Anchoring at the end had a cost the first measurement missed: plurals.** A backend moving
+    onto this logger held `freeApiKeys`, an array of real provider keys, which its match-anywhere
+    rule caught and `…apiKey$` did not. So the rule takes a plural for every word but `token`.
+    Swept across every repo's logger calls on 2026-09-24, the only other plurals near a log call
+    are token COUNTS (`inputTokens`, `maxTokens`, `promptTokens`), so `tokens` stays out and the
+    widening hides no field the fleet logs today. The measurement that justified end-anchoring
+    was about what it kept visible; the one it needed was about what it let through.
+
     The same pass found that the line's `{ ...meta }` spread sat OUTSIDE the `try` that promises a
     logger never throws. A getter on `meta` itself runs during the spread, so it threw out of
     `logger.error`. A getter one level down was fine, because `JSON.stringify` runs that one

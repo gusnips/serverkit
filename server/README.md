@@ -255,7 +255,8 @@ it covers the `cause` chain, including a link that is not an `Error`.
 
 **It hides the secrets it can recognize.** A key ending in `authorization`, `cookie`, `password`,
 `secret`, `token` or `apiKey` gets `"[redacted]"` instead of its value, at any depth, so logging a
-request's headers does not print the `Authorization` one. In every string, the message and an
+request's headers does not print the `Authorization` one. Plurals count too (`apiKeys`, `secrets`),
+except `tokens`, which in a log is a count. In every string, the message and an
 error's stack included, `Bearer …` and the `user:password@` in a URL are replaced too. The key has
 to END with the word, so `apiKeyId`, `inputTokens` and `tokenId` still print. You cannot turn this
 off. To hide more, add your own rules:
