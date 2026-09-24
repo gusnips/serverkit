@@ -1,9 +1,10 @@
-import { Pool } from "pg";
-import { describe, expect, it, vi } from "vitest";
-import { createPgPool, DEFAULT_CONNECT_TIMEOUT_MS, pingPool } from "./index.ts";
+import { Pool, TypeOverrides, types } from "pg";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import { hasPostgres, startPostgres } from "../__tests__/postgres-server.ts";
+import { createPgPool, DEFAULT_CONNECT_TIMEOUT_MS, pingPool, type PgPoolOptions } from "./index.ts";
 
 /** A Pool never connects on construction, so every assertion below runs with no database. */
-function pool(overrides: Partial<ConstructorParameters<typeof Pool>[0]> = {}) {
+function pool(overrides: Partial<PgPoolOptions> = {}) {
   return createPgPool({
     connectionString: "postgres://u@127.0.0.1:1/x",
     onIdleError: () => {},
@@ -40,6 +41,73 @@ describe("createPgPool", () => {
     const boom = new Error("terminating connection due to administrator command");
     p.emit("error", boom);
     expect(onIdleError).toHaveBeenCalledWith(boom);
+  });
+});
+
+describe("createPgPool date columns", () => {
+  const parse = (p: Pool, oid: number, text: string): unknown =>
+    p.options.types?.getTypeParser(oid, "text")(text);
+
+  it("reads a date as the day Postgres wrote, not a midnight in the box's zone", () => {
+    const p = pool();
+    expect(parse(p, 1082, "2026-09-23")).toBe("2026-09-23");
+    // A BC date is quoted inside an array, and NULL is not the string "NULL".
+    expect(parse(p, 1182, '{2026-09-23,NULL,"0044-03-15 BC"}')).toEqual([
+      "2026-09-23",
+      null,
+      "0044-03-15 BC",
+    ]);
+  });
+
+  it("changes only date, and only on this pool", () => {
+    const p = pool();
+    // A timestamptz is a real instant, so it stays a Date.
+    expect(parse(p, 1184, "2026-09-23 12:00:00+00")).toBeInstanceOf(Date);
+    // The process-wide parser is untouched, so another pool or library still gets a Date.
+    expect(types.getTypeParser(1082, "text")("2026-09-23")).toBeInstanceOf(Date);
+  });
+
+  it("keeps the caller's own parsers for everything else", () => {
+    const own = new TypeOverrides();
+    own.setTypeParser(20, "text", (value) => BigInt(value));
+    const p = pool({ types: own });
+    expect(parse(p, 20, "9007199254740993")).toBe(9007199254740993n);
+    expect(parse(p, 1082, "2026-09-23")).toBe("2026-09-23");
+  });
+
+  it('hands dates back to pg with dateColumns: "date"', () => {
+    expect(parse(pool({ dateColumns: "date" }), 1082, "2026-09-23")).toBeUndefined();
+  });
+});
+
+describe.skipIf(!hasPostgres)("createPgPool date columns against a real Postgres", () => {
+  let server: Awaited<ReturnType<typeof startPostgres>>;
+
+  beforeAll(async () => {
+    server = await startPostgres();
+  }, 30_000);
+
+  afterAll(async () => {
+    await server.stop();
+  });
+
+  it("returns the day as a string, while a plain Pool in the same process still gets a Date", async () => {
+    const sql = `SELECT '2026-09-23'::date AS day,
+                        ARRAY['2026-09-23'::date, NULL] AS days,
+                        '2026-09-23T12:00:00Z'::timestamptz AS at`;
+    const ours = createPgPool({ connectionString: server.url, onIdleError: () => {} });
+    const plain = new Pool({ connectionString: server.url });
+    try {
+      const { rows } = await ours.query(sql);
+      expect(rows[0]).toEqual({
+        day: "2026-09-23",
+        days: ["2026-09-23", null],
+        at: new Date("2026-09-23T12:00:00Z"),
+      });
+      expect((await plain.query(sql)).rows[0].day).toBeInstanceOf(Date);
+    } finally {
+      await Promise.all([ours.end(), plain.end()]);
+    }
   });
 });
 

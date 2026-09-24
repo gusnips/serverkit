@@ -456,6 +456,12 @@ closes an idle client — a restart, a failover, a dropped tunnel. With no liste
 that into an uncaught exception and a crash handler exits the process, so a connection nobody
 was using takes the API down. `onIdleError` is a required field, not an option.
 
+**It reads a `date` column as the day.** `'2026-09-23'` comes back as the string `"2026-09-23"`.
+node-postgres would give you a Date at midnight in the machine's own time zone, so the same row
+is a different moment on every server, and on one east of UTC `toISOString()` gives the day
+before. A `timestamptz` still comes back as a Date, because it is a real moment. This applies to
+this pool only; pass `dateColumns: "date"` to get Dates back.
+
 Readiness gets its own call, and it has a deadline:
 
 ```ts

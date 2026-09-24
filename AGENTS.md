@@ -413,6 +413,25 @@ host outside the URL.
     And it said one copy was bounded-but-uncleared; it is **three**, and all three left the
     `setTimeout` running, so a process probed every few seconds carried a live timer per probe.
 
+    **A `date` column reads as the day, `"2026-09-23"`, and never as a Date.** pg-types 2.2.0
+    parses OID 1082 into a Date at local midnight, so one row is a different instant on every box:
+    measured `T00:00Z` under `TZ=UTC`, `T03:00Z` under São Paulo, and `2026-09-22T22:00Z` under
+    Berlin, where `toISOString()` names the day before. This package contradicted itself: `db-types`
+    has always written `date` as `string`, and the pool delivered a Date. Measured 2026-09-23 across
+    the fleet: thirteen `date` columns behind this pool, every one written from the app as a key.
+    Of the three places that read one back, two cast to text in SQL to get around the driver, and
+    the third typed the column `string` and got a Date from every `RETURNING *`.
+
+    It is set through the pool's own `types`, never the process-wide `setTypeParser`, so another
+    pool or library in the process keeps pg's answer; the test runs both pools against a real
+    Postgres, because a parser on `options.types` proves nothing until a query goes through it.
+    `timestamptz` stays a Date, because that one is a real instant. `date[]` goes through `text[]`'s
+    parser. pg-types' typings declare an `arrayParser(source, transform)` that the runtime does not
+    have (it is `{ create }`), so the typed call would throw. And it shipped in a minor, not a
+    patch: rows are untyped, so a caller doing `row.day.getTime()` breaks at runtime with nothing
+    at compile time. A caret on 0.7 does not reach it, and `dateColumns: "date"` keeps the old
+    answer for anyone who needs the bump without the change.
+
     **What did NOT come across, and why.** The `ssl` rule: `@gusnips/migrate` already exports
     `pgSsl`, and the nine hand-written copies were byte-identical in the body — only their
     comments differed, and they differed about WHY Supabase cloud goes unverified. The pool

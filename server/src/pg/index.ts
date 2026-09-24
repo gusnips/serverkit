@@ -1,6 +1,7 @@
 /**
  * `@gusnips/server/pg`: the two decisions every backend makes when it creates a node-postgres
- * Pool, and that eleven of them made by hand.
+ * Pool, and that eleven of them made by hand — plus one almost none of them made, which is what
+ * a `date` column reads as.
  *
  *     const pool = createPgPool({
  *       connectionString: env.DATABASE_URL,
@@ -16,7 +17,7 @@
  * of this fleet agreed on byte-for-byte, and it already carries the finding that their comments
  * did NOT agree on why. Spread it in beside `connectionString`.
  */
-import { Pool, type PoolConfig } from "pg";
+import { Pool, TypeOverrides, types, type CustomTypesConfig, type PoolConfig } from "pg";
 
 /**
  * How long a caller waits for a free connection before failing loudly.
@@ -43,6 +44,24 @@ export interface PgPoolOptions extends PoolConfig {
    * to forget.
    */
   onIdleError: (error: Error) => void;
+
+  /**
+   * What a `date` column, and a `date[]`, reads as. Default `"string"`: the day as Postgres wrote
+   * it, `"2026-09-23"`.
+   *
+   * A `date` has no time and no zone, and node-postgres turns it into a Date at local MIDNIGHT —
+   * so one row is a different instant on every box. Measured on pg-types 2.2.0: `'2026-09-23'`
+   * reads as `2026-09-23T00:00:00.000Z` under `TZ=UTC`, `T03:00:00.000Z` under
+   * `TZ=America/Sao_Paulo`, and `2026-09-22T22:00:00.000Z` under `TZ=Europe/Berlin`, where
+   * `toISOString().slice(0, 10)` gives back the day before. A string cannot move, and it is what
+   * `@gusnips/migrate`'s `db-types` already writes into the row types, so the types stop lying.
+   *
+   * Set on this pool only, through pg's per-client `types`, never the process-wide
+   * `types.setTypeParser`: another pool or library in the same process still gets what it asked
+   * for. Only `date` changes — a `timestamptz` Date is a real instant. `"date"` hands both back to
+   * pg's own parser, or to the `types` you pass.
+   */
+  dateColumns?: "string" | "date";
 }
 
 /**
@@ -74,10 +93,32 @@ export interface PgPoolOptions extends PoolConfig {
  * `let`, and that is the app's lifecycle to own — a package that holds it decides when your
  * process can exit.
  */
-export function createPgPool({ onIdleError, ...config }: PgPoolOptions): Pool {
-  const pool = new Pool({ connectionTimeoutMillis: DEFAULT_CONNECT_TIMEOUT_MS, ...config });
+export function createPgPool({
+  onIdleError,
+  dateColumns = "string",
+  ...config
+}: PgPoolOptions): Pool {
+  const pool = new Pool({
+    connectionTimeoutMillis: DEFAULT_CONNECT_TIMEOUT_MS,
+    ...config,
+    types: dateColumns === "string" ? datesAsText(config.types) : config.types,
+  });
   pool.on("error", onIdleError);
   return pool;
+}
+
+/** OIDs from `pg_type`. A `date[]` goes through `text[]`'s parser, which reads any array as its
+ *  elements' text, quoting and `NULL` included. `number` because pg-types' `TypeId` lists only
+ *  the base types, while its `getTypeParser` takes any OID. */
+const DATE = 1082;
+const DATE_ARRAY = 1182;
+const TEXT_ARRAY: number = 1009;
+
+function datesAsText(base: CustomTypesConfig | undefined): TypeOverrides {
+  const overrides = new TypeOverrides(base);
+  overrides.setTypeParser(DATE, "text", (value) => value);
+  overrides.setTypeParser(DATE_ARRAY, "text", types.getTypeParser(TEXT_ARRAY, "text"));
+  return overrides;
 }
 
 export interface PingOptions {
