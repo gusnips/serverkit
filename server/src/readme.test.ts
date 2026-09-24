@@ -140,6 +140,34 @@ describe("the README", () => {
     expect(entry.error.stack).toContain("Error: invalid signature");
   });
 
+  it("hides what the README says it hides, and the rules it adds", () => {
+    const lines: string[] = [];
+    const logger = createLogger({
+      write: (line) => lines.push(line),
+      redact: { keys: /cpf$/i, values: [[/\bacme_[\w-]+/g, "[redacted]"]] },
+    });
+    logger.info("called with acme_live_1", {
+      headers: { Authorization: "Bearer abc" },
+      dsn: "postgres://app:hunter2@db/x",
+      cpf: "123",
+      apiKeyId: "key_1",
+      inputTokens: 12,
+      tokenId: "tk_1",
+    });
+    expect(JSON.parse(String(lines[0]))).toMatchObject({
+      message: "called with [redacted]",
+      headers: { Authorization: "[redacted]" },
+      dsn: "postgres://[redacted]@db/x",
+      cpf: "[redacted]",
+      apiKeyId: "key_1",
+      inputTokens: 12,
+      tokenId: "tk_1",
+    });
+    expect(() => createLogger({ redact: { values: [[/acme_\w+/, "[redacted]"]] } })).toThrow(
+      /g flag/,
+    );
+  });
+
   it("mounts the Hono pieces in the order the snippet mounts them", async () => {
     // Mounted exactly as the README prints it, then made to throw a NON-Error — which is the
     // reason the README calls errorBoundary not optional. Without it Hono never reaches onError

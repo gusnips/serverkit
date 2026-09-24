@@ -293,6 +293,27 @@ host outside the URL.
     address and a card number in it. **`stack` is kept**, because a job that dies crosses its queue
     through a serializer and arrives as a plain object, in the one line whose job is to say which
     job died and why.
+
+    **And a secret is hidden by the END of its key, never by a word anywhere in it.** Two backends
+    wrote key and value redaction independently, and both matched `token`, `secret` and `api_key`
+    anywhere in the key. Measured across the fleet's logger calls (1,085 of them carry an `error`
+    key, which is how the extraction was checked): that rule hides **11 fields in 6 repos and not
+    one is a secret**, among them `apiKeyId`, which says which key made the request, two booleans
+    saying whether a secret was set, and five token counts. Those calls log no key that holds a
+    secret. So the rule guards the object nobody meant to log whole, like a request's headers, and
+    matching at the end keeps every one of the 11 fields. The value rules are the two that are
+    credentials wherever they appear: `Bearer …` and `user:password@` in a URL. E-mail addresses,
+    CPFs and product key prefixes are one product's policy, so they are added through `redact`,
+    beside the defaults and never instead of them. A value pattern without `g` throws at boot,
+    because `replace` would hide the first copy and print the second; a key pattern is matched
+    with `search`, because `test` on a `g` pattern resumes from `lastIndex` and prints the next
+    key.
+
+    The same pass found that the line's `{ ...meta }` spread sat OUTSIDE the `try` that promises a
+    logger never throws. A getter on `meta` itself runs during the spread, so it threw out of
+    `logger.error`. A getter one level down was fine, because `JSON.stringify` runs that one
+    inside the `try`, and that nested case was the only one the test tried.
+
 27. **`assertEveryRouteGuarded` probes the router, and refuses an app with no endpoints.** It asks
     the real matcher which handlers run before each route, rather than reading the code, so a guard
     mounted on the wrong prefix is caught. The empty-app refusal is the important line: a check over

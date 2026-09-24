@@ -46,6 +46,79 @@ export interface LoggerOptions {
    * because without it every test of anything that logs has to monkey-patch a global.
    */
   write?: (line: string, level: LogLevel) => void;
+  /**
+   * More to hide, on top of what is always hidden. See {@link RedactOptions}.
+   *
+   * There is no way to turn the defaults off. A bearer token, a password in a database URL or an
+   * `Authorization` header in a log line is never what anybody wanted.
+   */
+  redact?: RedactOptions;
+}
+
+export interface RedactOptions {
+  /** A key whose value is replaced whole, at any depth: `/cpf$/i`. Checked beside the default. */
+  keys?: RegExp;
+  /**
+   * A pattern replaced in every string on the line: the message, every value, and an error's
+   * message and stack. Each one needs the `g` flag, and it runs after the defaults:
+   * `[/\bacme_[\w-]+/g, "[redacted]"]`.
+   */
+  values?: ReadonlyArray<readonly [pattern: RegExp, replacement: string]>;
+}
+
+const REDACTED = "[redacted]";
+
+/**
+ * A key whose value never reaches a line. Two backends wrote this rule independently, and both
+ * matched the words ANYWHERE in the key. Measured across the fleet's logger calls, that hides 11
+ * fields in 6 repos and not one of them is a secret: `apiKeyId` (which key made the request),
+ * `tokenId`, two booleans saying whether a secret was set, and five token counts. The same
+ * calls log no key that does hold a secret, so this rule is a guard for the object nobody meant
+ * to log whole, like a request's headers. Matching at the END of the key keeps all 11 and still
+ * catches `authorization`, `set-cookie`, `newPassword`, `clientSecret`, `accessToken`,
+ * `x-api-key` and `secretAccessKey`.
+ */
+const SECRET_KEY =
+  /(?:authorization|cookies?|password|secret|token|(?:api|access|secret|private)[_-]?key)$/i;
+
+/** Patterns replaced in every string. Both are credentials wherever they appear. */
+const SECRET_VALUES: ReadonlyArray<readonly [RegExp, string]> = [
+  // An `Authorization` value pasted into a message or an error. It stops at a comma or a
+  // semicolon, so the rest of a header list survives.
+  [/\bBearer\s+[^\s,;]+/gi, `Bearer ${REDACTED}`],
+  // `user:password@` in any URL. A database URL inside a connection error is the usual one.
+  [/\b([a-z][a-z\d+.-]*:\/\/)[^\s/?#]+@/gi, `$1${REDACTED}@`],
+];
+
+type Replacer = (this: unknown, key: string, value: unknown) => unknown;
+
+function redactor({ keys, values = [] }: RedactOptions = {}) {
+  for (const [pattern] of values) {
+    // Loud at construction, like an unknown level: without `g`, `replace` hides only the first
+    // match in each string, and the second copy of the secret is printed.
+    if (!pattern.global) {
+      throw new Error(`redact.values: ${String(pattern)} needs the g flag to hide every match.`);
+    }
+  }
+  const patterns = [...SECRET_VALUES, ...values];
+  const text = (value: string) =>
+    patterns.reduce((out, [pattern, replacement]) => out.replace(pattern, replacement), value);
+  // `search`, not `test`: `test` on a `g` regex resumes from `lastIndex`, so the same key would
+  // be hidden on one line and printed on the next.
+  const secretKey = (key: string) =>
+    SECRET_KEY.test(key) || (keys !== undefined && key.search(keys) !== -1);
+
+  return {
+    text,
+    /** Wraps a replacer. The key is checked first, so a secret never reaches the serializer. */
+    replacer(inner: Replacer): Replacer {
+      return function (key, value) {
+        if (value !== undefined && secretKey(key)) return REDACTED;
+        const out = inner.call(this, key, value);
+        return typeof out === "string" ? text(out) : out;
+      };
+    },
+  };
 }
 
 const LEVELS: Record<LogLevel, number> = { debug: 10, info: 20, warn: 30, error: 40 };
@@ -81,6 +154,7 @@ function consoleWrite(line: string, level: LogLevel): void {
 export function createLogger(options: LoggerOptions = {}): Logger {
   const threshold = resolveThreshold(options.level);
   const write = options.write ?? consoleWrite;
+  const redact = redactor(options.redact);
 
   function emit(level: LogLevel, message: string, meta?: Record<string, unknown>): void {
     if (LEVELS[level] < threshold) return;
@@ -88,15 +162,20 @@ export function createLogger(options: LoggerOptions = {}): Logger {
     // the line's own label, severity or timestamp. One backend re-implemented this logger inline
     // with the order inverted, and a `meta.message` silently became the line.
     const time = new Date().toISOString();
-    const entry = { ...meta, level, time, message };
     let line: string;
     try {
-      line = JSON.stringify(entry, errorReplacer());
+      // The spread is inside the `try` because it runs `meta`'s own getters.
+      line = JSON.stringify({ ...meta, level, time, message }, redact.replacer(errorReplacer()));
     } catch {
       // A logger must never take down the process it is reporting on. Reachable through a
       // throwing getter or a throwing `toJSON()` on something in `meta` — and the flag is there
       // so a reader knows a line was lost rather than never written.
-      line = JSON.stringify({ level, time, message, logSerializationFailed: true });
+      line = JSON.stringify({
+        level,
+        time,
+        message: redact.text(message),
+        logSerializationFailed: true,
+      });
     }
     write(line, level);
   }

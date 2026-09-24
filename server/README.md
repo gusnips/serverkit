@@ -253,6 +253,23 @@ all of that, and a webhook route is unauthenticated by definition — so anyone 
 could choose what went into the log. The list admits 4 of that payment error's 25 properties, and
 it covers the `cause` chain, including a link that is not an `Error`.
 
+**It hides the secrets it can recognize.** A key ending in `authorization`, `cookie`, `password`,
+`secret`, `token` or `apiKey` gets `"[redacted]"` instead of its value, at any depth, so logging a
+request's headers does not print the `Authorization` one. In every string, the message and an
+error's stack included, `Bearer …` and the `user:password@` in a URL are replaced too. The key has
+to END with the word, so `apiKeyId`, `inputTokens` and `tokenId` still print. You cannot turn this
+off. To hide more, add your own rules:
+
+```ts
+const logger = createLogger({
+  level: process.env.LOG_LEVEL,
+  redact: { keys: /cpf$/i, values: [[/\bacme_[\w-]+/g, "[redacted]"]] },
+});
+```
+
+They run beside the defaults, not instead of them. A value pattern needs the `g` flag, because
+without it only the first match in each string is hidden; `createLogger` throws if one is missing.
+
 `level` is an argument rather than a `process.env` read, and that is the boundary the package is
 built on: a Cloudflare Worker has no `process` at all, so a module-scope read makes a package
 Node-only by accident. A Worker passes `env.LOG_LEVEL` from its handler argument. An unrecognized

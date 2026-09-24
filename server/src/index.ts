@@ -12,7 +12,13 @@ export type { CannedError, ErrorAnswer, ErrorResponseOptions } from "./responses
 // The wire shape lives with the envelope, so a client reads the same type the server writes.
 export type { ValidationIssue } from "@gusnips/http";
 export { createLogger, errorReplacer, keptErrorFields } from "./logger/index.ts";
-export type { Logger, LoggerOptions, LogLevel, LogThreshold } from "./logger/index.ts";
+export type {
+  Logger,
+  LoggerOptions,
+  LogLevel,
+  LogThreshold,
+  RedactOptions,
+} from "./logger/index.ts";
 export {
   checkUrlShape,
   isInternalHostname,

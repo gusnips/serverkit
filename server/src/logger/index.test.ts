@@ -62,6 +62,17 @@ describe("a logger that cannot serialize a line", () => {
       logSerializationFailed: true,
     });
   });
+
+  it("survives a throwing getter on meta itself, which the spread runs before stringify", () => {
+    const meta = {
+      get broken(): never {
+        throw new Error("getter");
+      },
+    };
+    const { lines, write } = capture();
+    expect(() => createLogger({ write }).error("charge failed", meta)).not.toThrow();
+    expect(lines[0]!.entry).toMatchObject({ logSerializationFailed: true });
+  });
 });
 
 describe("the level", () => {
@@ -133,5 +144,99 @@ describe("where a line goes", () => {
     expect(log).toHaveBeenCalledTimes(2);
     expect(warn).toHaveBeenCalledTimes(1);
     expect(error).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("redaction", () => {
+  it("hides the value of a secret-named key, at any depth", () => {
+    const { lines, write } = capture();
+    createLogger({ write }).warn("upstream refused", {
+      headers: { Authorization: "Bearer abc", "x-api-key": "k1", "set-cookie": "sid=1" },
+      user: { newPassword: "hunter2" },
+      accessToken: "t1",
+      secretAccessKey: "s1",
+      cookies: { sid: "1" },
+    });
+    expect(lines[0]!.entry).toMatchObject({
+      cookies: "[redacted]",
+      headers: {
+        Authorization: "[redacted]",
+        "x-api-key": "[redacted]",
+        "set-cookie": "[redacted]",
+      },
+      user: { newPassword: "[redacted]" },
+      accessToken: "[redacted]",
+      secretAccessKey: "[redacted]",
+    });
+  });
+
+  it("keeps a key that only contains the word, because those are the fleet's real fields", () => {
+    // Every one of these is logged today, and a match anywhere in the key hid all of them.
+    const meta = {
+      apiKeyId: "key_1",
+      tokenId: "tk_1",
+      envSecretSet: true,
+      inputTokens: 12,
+      maxOutputTokens: 4096,
+    };
+    const { lines, write } = capture();
+    createLogger({ write }).info("completion", meta);
+    expect(lines[0]!.entry).toMatchObject(meta);
+  });
+
+  it("hides a bearer token and URL credentials in every string, an error's stack included", () => {
+    const { lines, write } = capture();
+    createLogger({ write }).error("connect to postgres://app:hunter2@db:5432/x failed", {
+      error: new Error("sent Bearer abc.def, got 401"),
+    });
+    const line = JSON.stringify(lines[0]!.entry);
+    expect(lines[0]!.entry.message).toBe("connect to postgres://[redacted]@db:5432/x failed");
+    expect(lines[0]!.entry.error).toMatchObject({ message: "sent Bearer [redacted], got 401" });
+    expect(line).not.toMatch(/hunter2|abc\.def/);
+  });
+
+  it("adds the caller's rules to the defaults rather than replacing them", () => {
+    const { lines, write } = capture();
+    createLogger({
+      write,
+      redact: { keys: /cpf/gi, values: [[/\bacme_[\w-]+/g, "[redacted]"]] },
+    }).info("key acme_live_123 used with Bearer xyz", {
+      // With a `g` pattern, `test` would search `cpf` from where `ownerCpf` matched, past its end,
+      // and print it.
+      ownerCpf: "1",
+      cpf: "2",
+      authorization: "a",
+    });
+    expect(lines[0]!.entry).toMatchObject({
+      message: "key [redacted] used with Bearer [redacted]",
+      ownerCpf: "[redacted]",
+      cpf: "[redacted]",
+      authorization: "[redacted]",
+    });
+  });
+
+  it("refuses a value pattern without the g flag at boot", () => {
+    // Without `g`, `replace` hides the first match in each string and prints the second.
+    expect(() => createLogger({ redact: { values: [[/acme_\w+/, "x"]] } })).toThrow(/g flag/);
+  });
+
+  it("still hides the message when the line cannot be serialized", () => {
+    const { lines, write } = capture();
+    const hostile = {
+      toJSON() {
+        throw new Error("no");
+      },
+    };
+    createLogger({ write }).error("retry with Bearer abc", { hostile });
+    expect(lines[0]!.entry).toMatchObject({
+      message: "retry with Bearer [redacted]",
+      logSerializationFailed: true,
+    });
+  });
+
+  it("leaves an undefined secret out, as JSON always did", () => {
+    const { lines, write } = capture();
+    createLogger({ write }).info("x", { token: undefined });
+    expect(lines[0]!.entry).not.toHaveProperty("token");
   });
 });
