@@ -10,7 +10,7 @@
  * API next door masks exactly that. A `Context`-shaped function would serve one of those four
  * callers. The framework adapter is eight lines and lives in `/hono`.
  */
-import type { ApiError, ApiSuccess, PaginationMeta } from "@gusnips/http";
+import type { ApiError, ApiSuccess, PaginationMeta, ValidationIssue } from "@gusnips/http";
 import { AppError } from "./errors.ts";
 
 /**
@@ -175,17 +175,6 @@ interface RawIssue {
   readonly code?: unknown;
   readonly maximum?: unknown;
   readonly minimum?: unknown;
-}
-
-/** One rejected field: enough to fix the call, and nothing about the schema. */
-export interface ValidationIssue {
-  /** The field that failed, as the caller spelled it. */
-  path: (string | number)[];
-  /** The rule that rejected it, such as `too_big`. */
-  code: string;
-  /** The numeric bound, when the rule has one. */
-  maximum?: number;
-  minimum?: number;
 }
 
 /**

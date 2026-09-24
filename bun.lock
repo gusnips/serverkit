@@ -33,9 +33,9 @@
     },
     "server": {
       "name": "@gusnips/server",
-      "version": "0.4.1",
+      "version": "0.5.2",
       "devDependencies": {
-        "@gusnips/http": ">=0.1 <1",
+        "@gusnips/http": ">=0.1.1 <1",
         "@supabase/supabase-js": "^2.113.0",
         "@types/node": "^24.12.0",
         "@types/pg": "^8.15.0",
@@ -47,7 +47,7 @@
         "zod": "^4.3.6",
       },
       "peerDependencies": {
-        "@gusnips/http": ">=0.1 <1",
+        "@gusnips/http": ">=0.1.1 <1",
         "@supabase/supabase-js": ">=2.91 <3",
         "hono": ">=4.9.9 <5",
         "ioredis": ">=5.6 <6",
@@ -81,7 +81,7 @@
 
     "@eslint/plugin-kit": ["@eslint/plugin-kit@0.4.1", "", { "dependencies": { "@eslint/core": "^0.17.0", "levn": "^0.4.1" } }, "sha512-43/qtrDUokr7LJqoF2c3+RInu/t4zfrpYdoSDfYyhg52rwLV6TnOvdG4fXm7IkSB3wErkcmJS9iEhjVtOSEjjA=="],
 
-    "@gusnips/http": ["@gusnips/http@0.1.0", "", {}, "sha512-owqYWH9DqxJUIbqGUCR/n6a3wA+AIENMwOOSQb71EJxBWCiadjUtTn7fpulSMRDhlXCasS+pKJmNb3xQyHAMPw=="],
+    "@gusnips/http": ["@gusnips/http@0.1.1", "", {}, "sha512-QW76Zx5RV38mo6CUK+z1Vc6RoM9vfEOPg7vdc7AB3dH9kDttJ3cf8K9LpwLZvnKBCYaG1Ebsm9Qouy4mcjdRqg=="],
 
     "@gusnips/migrate": ["@gusnips/migrate@workspace:migrate"],
 
