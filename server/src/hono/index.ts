@@ -19,6 +19,8 @@ export type { ErrorHandlerOptions } from "./errors.ts";
 export { assertEveryRouteGuarded, guard, underAny } from "./guards.ts";
 export type { GuardCheckOptions } from "./guards.ts";
 export { created, noContent, ok, paginated } from "./responses.ts";
+export { clientIp } from "./client-ip.ts";
+export type { ClientIpOptions, ClientIpVariables } from "./client-ip.ts";
 export { rateLimit } from "./rate-limit.ts";
 export type { RateLimitOptions } from "./rate-limit.ts";
 export { requestLogger } from "./request-logger.ts";

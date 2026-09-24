@@ -57,6 +57,8 @@ serverkit/
 │       ├── pg/           ← createPgPool(): the wait is bounded, the idle handler is required
 │       ├── redis/        ← createRedis(), the bounded probes, and the rate-limit window store
 │       ├── rate-limit.ts ← hitWindow() and the memory store; rateLimit() is in hono/
+│       ├── client-ip.ts  ← clientIpOf() and ipSubject(): the socket first, a header only from the proxy
+│       ├── ip.ts         ← the IPv4 and IPv6 parsers url-guard and client-ip share; not exported
 │       ├── url-guard.ts  ← the SSRF check a Worker can run: address, URL shape, redirect, body cap
 │       └── node/         ← the one directory allowed Node: fetchPublic() resolves once, dials pinned
 ├── scripts/
@@ -206,7 +208,7 @@ both Bun 1.3.8 and Node 22. It is the driver's, not the runner's, and `describeT
 brackets is still right for the guard. Someone on IPv6 loopback writes `localhost` or passes the
 host outside the URL.
 
-### …and fifteen for `@gusnips/server`
+### …and sixteen for `@gusnips/server`
 
 21. **A success builder returns an ANSWER, not a body — so on Hono, import the adapters.** `ok`,
     `created`, `paginated` and `noContent` in `responses.ts` answer `{ status, body }`, because the
@@ -508,6 +510,20 @@ Unhandled error event:", ...)` and returns — it never emits, so Node's throw i
     key over the limit forever. And the memory store sweeps once per closed window rather than
     once per request: the donors that shed walked all 50,000 keys for every new one while full,
     measured at 3.8 ms of event-loop time per shed request, which made the shed the flood's tool.
+
+36. **A client's address comes from the socket, and a header only from the proxy that wrote it.**
+    Most of the fleet read the last `X-Forwarded-For` hop, which is right behind the proxy and only
+    there: six APIs listen on every interface, and unless a firewall closes the port, a caller that
+    reaches it directly writes that hop itself and picks its own rate-limit window. The one reader
+    that asked the socket first then read `X-Real-IP` ahead of the header, and its proxy passes a
+    client's own copy through (Caddy's documented default; no Caddy was run to measure it), so the
+    header list is a closed type with no `X-Real-IP` in it. Two measured facts shape the rest. On a
+    dual-stack socket Bun reports an IPv4 client as `::ffff:127.0.0.1`, so the loopback test folds
+    the mapped form first, where a `startsWith("127.")` misses the proxy. And `hono/bun`'s
+    `getConnInfo` throws for a request that did not come through `Bun.serve`, so a `peerOf` that
+    throws reads as no peer rather than failing every in-process test. No address is `null`, not
+    `"unknown"`: seven readers put every such request in one window that one caller could fill for
+    everyone.
 
 ## What the build measured
 

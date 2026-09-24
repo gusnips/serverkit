@@ -9,8 +9,10 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { Hono } from "hono";
 import {
   checkUrlShape,
+  clientIpOf,
   createAppError,
   hitWindow,
+  ipSubject,
   createErrorResponse,
   createLogger,
   memoryWindowStore,
@@ -279,5 +281,18 @@ describe("README — a rate limit", () => {
       allowed: false,
       retryAfterSecs: 60,
     });
+  });
+});
+
+describe("README — the client's address", () => {
+  it("takes the proxy's hop from loopback and the peer from anyone else", () => {
+    const forwarded = new Headers({ "x-forwarded-for": "198.51.100.7, 203.0.113.9" });
+    expect(clientIpOf(forwarded, { peer: "127.0.0.1" })).toBe("203.0.113.9");
+    expect(clientIpOf(forwarded, { peer: "198.51.100.200" })).toBe("198.51.100.200");
+  });
+
+  it("counts an IPv6 customer by its /56, and lets null through as null", () => {
+    expect(ipSubject("2001:db8:1234:56ff::1")).toBe("2001:db8:1234:5600::/56");
+    expect(ipSubject(null)).toBeNull();
   });
 });

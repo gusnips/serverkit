@@ -537,6 +537,46 @@ auth, it is the verified user, key or account, never the raw bearer token: a lim
 the token counts whatever string the caller sends. On one backend, 300 requests from one address
 with a new random token each were refused 0 times.
 
+### The client's address
+
+A limit in front of sign-in counts per address, and the address has to be one the caller cannot
+make up:
+
+```ts
+import { getConnInfo } from "hono/bun";
+import { ipSubject, memoryWindowStore } from "@gusnips/server";
+import { clientIp, rateLimit } from "@gusnips/server/hono";
+
+app.use(clientIp({ peerOf: (c) => getConnInfo(c).remote.address }));
+app.use(
+  "/auth/*",
+  rateLimit<AppEnv>({
+    scope: "pre-auth",
+    store: memoryWindowStore(),
+    limit: 3_000,
+    windowMs: 60_000,
+    key: (c) => ipSubject(c.get("clientIp")),
+    refuse: (hit) => errors.rateLimit(hit.retryAfterSecs),
+  }),
+);
+```
+
+- **The socket first.** `clientIp` reads the last `X-Forwarded-For` hop only when the socket peer
+  is loopback, which is your proxy on the same box, because that hop is the one the proxy wrote.
+  From anywhere else the peer is the client, and its `X-Forwarded-For` is its own claim. So an API
+  that also answers on its public interface cannot be handed a made-up address. `X-Real-IP` is
+  never read: by its documented default, Caddy passes a client's own copy through.
+- **On a Worker or on Fly**, pass the edge's header instead: `clientIp({ header:
+"cf-connecting-ip" })`. Not on a box behind a proxied Cloudflare record, where anyone who finds
+  the box's address can send that header too.
+- **`null` when no address can be trusted**, never `"unknown"`. A shared `"unknown"` window is one
+  any caller can fill for everyone. A `key` of `null` lets the request through uncounted; write
+  `?? "unknown"` if you would rather count those together.
+- **`ipSubject` counts an IPv6 address by its /56**, the network one customer is usually given.
+  Counted by the full address, one customer has 2^64 fresh windows. IPv4 is left as it is.
+- A `peerOf` that throws reads as no peer. `hono/bun`'s `getConnInfo` throws for every
+  `app.request()` in a test, so your tests run through it and see `null`.
+
 **The memory store counts per process** and starts again on every deploy. That is right for a
 burst limit in front of an auth round trip. It tracks 50,000 windows at most, and past that it
 refuses new ones, which `refuse` gets as `hit.outcome === "shed"`: that caller hit no limit, so

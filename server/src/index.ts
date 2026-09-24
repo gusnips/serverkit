@@ -31,3 +31,5 @@ export type {
   WindowLimit,
   WindowStore,
 } from "./rate-limit.ts";
+export { clientIpOf, ipSubject } from "./client-ip.ts";
+export type { ClientIpSource, PlatformIpHeader } from "./client-ip.ts";
