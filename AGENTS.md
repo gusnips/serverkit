@@ -56,6 +56,7 @@ serverkit/
 │       ├── supabase/     ← isAuthOutage(): did auth say no, or fail to answer?
 │       ├── pg/           ← createPgPool(): the wait is bounded, the idle handler is required
 │       ├── redis/        ← createRedis(), the bounded probes, and the rate-limit window store
+│       ├── bullmq/       ← queues that delete finished jobs, the dead letter, the schedule sync
 │       ├── rate-limit.ts ← hitWindow() and the memory store; rateLimit() is in hono/
 │       ├── client-ip.ts  ← clientIpOf() and ipSubject(): the socket first, a header only from the proxy
 │       ├── ip.ts         ← the IPv4 and IPv6 parsers url-guard and client-ip share; not exported
@@ -65,7 +66,8 @@ serverkit/
 │       ├── seal.ts       ← createSealer(): AES-GCM for a secret you store, with a key id to rotate
 │       ├── token.ts      ← signToken() and verifyToken(): a link that proves who it is for
 │       ├── env.ts        ← validateEnv(): every problem with the environment, in one error
-│       └── node/         ← the one directory allowed Node: fetchPublic(), scryptSealKey() and the drain
+│       ├── node/         ← the one directory allowed Node: fetchPublic(), scryptSealKey() and the drain
+│       └── __tests__/    ← the throwaway redis-server the Redis and BullMQ suites share
 ├── scripts/
 │   └── check-release.ts  ← packs each package and checks what the registry would get
 └── AGENTS.md             ← this file
@@ -213,7 +215,7 @@ both Bun 1.3.8 and Node 22. It is the driver's, not the runner's, and `describeT
 brackets is still right for the guard. Someone on IPv6 loopback writes `localhost` or passes the
 host outside the URL.
 
-### …and twenty-two for `@gusnips/server`
+### …and twenty-three for `@gusnips/server`
 
 21. **A success builder returns an ANSWER, not a body — so on Hono, import the adapters.** `ok`,
     `created`, `paginated` and `noContent` in `responses.ts` answer `{ status, body }`, because the
@@ -636,6 +638,31 @@ Unhandled error event:", ...)` and returns — it never emits, so Node's throw i
     the bug has broken. A second signal exits 1 at once: a process manager sends one and then
     SIGKILL, so the second comes from a person. The budget check stays in the adopter, because
     only the adopter can read its process manager's config; the README gives the order.
+43. **A job is final when BullMQ says so, and a finished job is deleted unless you say otherwise.**
+    Six `bullmq.ts` copies, four dead-letter files and five schedule syncs, 1,170 lines, and each
+    bug in them was one copy missing what another knew. Retention: one backend's Redis reached
+    about 16 GB and 14.9 million keys before it set any, and its operator scripts still add jobs
+    through a bare `Queue` with none, so the worker sets it too, and a job that chose nothing gets
+    the worker's (measured). Final: three of five dead letters counted attempts, and missed the
+    failures that end on attempt 1 of 3: an `UnrecoverableError`, a backoff that answers -1, and a
+    job that stalled past its limit. BullMQ stamps `finishedOn` only on the branch of
+    `moveToFailed` that will not retry, so it answers all three without knowing why the job failed
+    (measured on 5.76.4 and 5.81.5, the two ends of the fleet). The stall retry matches BullMQ's
+    exact sentence, because one copy matched the word "stalled" and re-ran jobs that failed on their
+    own. The schedule sync removes every scheduler its table does not name with one
+    `removeJobScheduler`, which also removes an old-style repeat and its delayed job (made on
+    5.12.0, removed on 5.76.4 and on 5.81.5), so the donors' `removeRepeatableByKey` branch goes.
+    A run that was already due when its scheduler went still runs, once. A cron pattern takes a
+    `tz` by type, because one copy ran on the box's clock.
+
+    **This build believed one thing that was false, and a planted defect is what caught it.** A
+    probe showed BullMQ refusing `"a:b"` as a custom id, and three donors name their dead-letter
+    record `${queue}-${job.id}`, where a scheduler's job id is `repeat:<id>:<ms>`. So the claim was
+    that those records are refused and a maintenance job's final failure is lost. BullMQ refuses a
+    colon unless the id has exactly two, kept for the old repeat ids, and `maint-repeat:x:123` has
+    two. The defect that put the donors' id back survived the suite, and that is the only reason the
+    claim never reached a commit. The record here still takes the id BullMQ gives it, for a smaller
+    reason: a job id that fails for good twice is recorded twice.
 
 ## What the build measured
 

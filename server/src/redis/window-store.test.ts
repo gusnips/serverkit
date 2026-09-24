@@ -1,6 +1,5 @@
-import { spawn, spawnSync, type ChildProcess } from "node:child_process";
-import { createServer } from "node:net";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { hasRedisServer, startRedisServer } from "../__tests__/redis-server.ts";
 import { hitWindow } from "../rate-limit.ts";
 import { createRedis } from "./index.ts";
 import { redisWindowStore, type WindowPipeline } from "./window-store.ts";
@@ -88,24 +87,17 @@ describe("redisWindowStore", () => {
   });
 });
 
-const hasRedis = spawnSync("redis-server", ["--version"]).status === 0;
-
-describe.skipIf(!hasRedis)("redisWindowStore against a real Redis", () => {
-  let server: ChildProcess;
+describe.skipIf(!hasRedisServer)("redisWindowStore against a real Redis", () => {
+  let server: Awaited<ReturnType<typeof startRedisServer>>;
   let url: string;
 
   beforeAll(async () => {
-    const port = await freePort();
-    server = spawn("redis-server", ["--port", String(port), "--save", "", "--appendonly", "no"]);
-    url = `redis://127.0.0.1:${port}`;
-    const probe = createRedis({ url, maxRetriesPerRequest: 1, onError: () => {} });
-    for (let i = 0; (await probe.ping().catch(() => "")) !== "PONG" && i < 50; i++)
-      await new Promise((r) => setTimeout(r, 50));
-    probe.disconnect();
+    server = await startRedisServer();
+    url = server.url;
   });
 
   afterAll(() => {
-    server.kill();
+    server.stop();
   });
 
   it("shares one count between two processes, and sets the expiry it promised", async () => {
@@ -131,18 +123,3 @@ describe.skipIf(!hasRedis)("redisWindowStore against a real Redis", () => {
     }
   });
 });
-
-function freePort(): Promise<number> {
-  return new Promise((resolve, reject) => {
-    const probe = createServer();
-    probe.once("error", reject);
-    probe.listen(0, "127.0.0.1", () => {
-      const address = probe.address();
-      probe.close(() =>
-        typeof address === "object" && address
-          ? resolve(address.port)
-          : reject(new Error("no port")),
-      );
-    });
-  });
-}

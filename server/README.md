@@ -562,6 +562,72 @@ it decides when your process can exit.
 `ioredis` is an optional peer, behind the `/redis` subpath, so importing `@gusnips/server` never
 installs it.
 
+## Background jobs
+
+Queues and workers for BullMQ, on the connection `createRedis` gives you:
+
+```bash
+bun add bullmq
+```
+
+```ts
+import {
+  createQueue,
+  createWorker,
+  retryStalledFailures,
+  wireDeadLetter,
+  type DeadLetter,
+} from "@gusnips/server/bullmq";
+
+const onError = (error: Error) => logger.error("[bullmq] connection error", { error });
+const reports = createQueue<{ userId: string }>("reports", { connection: redis, onError });
+const deadLetters = createQueue<DeadLetter>("dead-letters", { connection: redis, onError });
+
+const worker = createWorker<{ userId: string }>("reports", buildReport, {
+  connection: redis,
+  onError,
+  concurrency: 5,
+});
+const flush = wireDeadLetter(worker, deadLetters, { onError });
+await retryStalledFailures(reports);
+```
+
+- **Finished jobs are deleted.** BullMQ keeps them forever unless told otherwise, and one backend's
+  Redis grew to about 16 GB before anyone noticed. Completed jobs stay for a day, 200 at most.
+  Failed ones stay for a week, 1,000 at most. The worker sets the same limits, so a job a script
+  adds through a plain `new Queue` is deleted too.
+- **A job whose worker dies runs again after 30 seconds, twice at most.** For a job that must never
+  run twice, such as one that sends an email, pass `maxStalledCount: 0` and give its jobs
+  `attempts: 1`.
+- **`wireDeadLetter` records every job that failed for good**, in a queue of its own. Run a worker
+  on that queue to log each record or tell a person. It asks BullMQ whether the job will run again,
+  instead of counting attempts, so it also records a job that threw `UnrecoverableError` or
+  stalled too often on its first attempt. Three of the five dead letters it replaces missed those.
+  In your shutdown, call `flush()` after the worker closes and before Redis does.
+- **`retryStalledFailures` re-runs the jobs a deploy killed.** Two deploys during one long job use
+  up its two retries. It only matches the reason BullMQ writes, so a job that failed with the word
+  "stalled" in its own error stays failed. Never call it on a queue whose jobs must run at most
+  once.
+- **`CAPPED_EXPONENTIAL`** retries after about 5, 10 and 20 seconds, and so on up to 120:
+  `backoff: { type: CAPPED_EXPONENTIAL }`.
+- **`removeLeftoverJob`** is for jobs you add under an id you chose. BullMQ skips the add, with no
+  error, while a finished job with that id is still kept.
+
+Recurring jobs come from one table, synced on every boot:
+
+```ts
+await syncJobSchedulers(maintenance, {
+  "session-prune": { pattern: "20 4 * * *", tz: "UTC" },
+  "job-reaper": { every: 2 * 60_000 },
+});
+```
+
+A cron pattern without a time zone does not compile, because without one it runs on the server's
+clock. An entry you delete or rename stops running: the sync removes every scheduler on the queue
+that the table does not name, so give the table a queue of its own.
+
+`bullmq` is an optional peer, behind the `/bullmq` subpath.
+
 ## A rate limit
 
 ```ts
@@ -988,6 +1054,7 @@ Each of these was measured, not assumed.
 - A webhook checked while no secret is set is refused, never passed.
 - A secret still set to its `.env.example` placeholder stops the boot.
 - A drain that hangs exits 1, never 0.
+- A cron schedule without a time zone does not compile.
 
 ## Develop
 
