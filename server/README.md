@@ -243,6 +243,7 @@ logger.error("charge failed", { orderId, error: err }); // the RAW error, never 
 `JSON.stringify(err)` is `{}` — which is how a logger ends up printing nothing about the failure
 it was called to report. The serializer adds them, follows the `cause` chain and an
 `AggregateError`'s `errors`, and collapses a circular reference instead of crashing the log call.
+An error passed on its own, `logger.error("drain failed", err)`, is written under `error` too.
 
 **What it keeps off an error is an allow-list**, and that is the one thing here that exists
 because of an incident rather than because of duplication. An SDK hangs its own INPUTS off the

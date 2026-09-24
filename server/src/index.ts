@@ -16,6 +16,7 @@ export type {
   Logger,
   LoggerOptions,
   LogLevel,
+  LogMeta,
   LogThreshold,
   RedactOptions,
 } from "./logger/index.ts";

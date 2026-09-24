@@ -39,6 +39,21 @@ describe("the log line", () => {
     });
     expect(lines[0]!.entry.time).not.toBe("not a time");
   });
+
+  it("files an Error passed on its own under `error`, rather than spreading it into nothing", async () => {
+    const { lines, write } = capture();
+    const logger = createLogger({ write });
+    // The shape it arrives in: `err` is `any` in a promise's catch.
+    await Promise.reject(Object.assign(new Error("drain failed"), { code: "ECONNRESET" })).catch(
+      (err) => logger.error("could not drain the queue", err),
+    );
+
+    expect(lines[0]!.entry).toMatchObject({
+      message: "could not drain the queue",
+      error: { name: "Error", message: "drain failed", code: "ECONNRESET" },
+    });
+    expect(lines[0]!.entry.error).toHaveProperty("stack");
+  });
 });
 
 describe("a logger that cannot serialize a line", () => {

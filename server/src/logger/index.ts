@@ -15,11 +15,17 @@ export type LogLevel = "debug" | "info" | "warn" | "error";
 /** A threshold, which is a level or "silent". "silent" is not a level: nothing logs AT it. */
 export type LogThreshold = LogLevel | "silent";
 
+/**
+ * What a line carries beside its message. An `Error` passed on its own is written under `error`,
+ * the same as `{ error: err }`.
+ */
+export type LogMeta = Record<string, unknown> | Error;
+
 export interface Logger {
-  debug(message: string, meta?: Record<string, unknown>): void;
-  info(message: string, meta?: Record<string, unknown>): void;
-  warn(message: string, meta?: Record<string, unknown>): void;
-  error(message: string, meta?: Record<string, unknown>): void;
+  debug(message: string, meta?: LogMeta): void;
+  info(message: string, meta?: LogMeta): void;
+  warn(message: string, meta?: LogMeta): void;
+  error(message: string, meta?: LogMeta): void;
 }
 
 export interface LoggerOptions {
@@ -161,8 +167,12 @@ export function createLogger(options: LoggerOptions = {}): Logger {
   const write = options.write ?? consoleWrite;
   const redact = redactor(options.redact);
 
-  function emit(level: LogLevel, message: string, meta?: Record<string, unknown>): void {
+  function emit(level: LogLevel, message: string, meta?: LogMeta): void {
     if (LEVELS[level] < threshold) return;
+    // An Error's message and stack are not enumerable, so spread as the whole of `meta` it would
+    // leave a line that says nothing about what failed. `.catch((err) => logger.error("…", err))`
+    // is the shape that does it, and `err` is `any` there, so no type ever caught it.
+    const fields = meta instanceof Error ? { error: meta } : meta;
     // Canonical fields last, so they win: a meta `message`, `level` or `time` must never replace
     // the line's own label, severity or timestamp. One backend re-implemented this logger inline
     // with the order inverted, and a `meta.message` silently became the line.
@@ -170,7 +180,7 @@ export function createLogger(options: LoggerOptions = {}): Logger {
     let line: string;
     try {
       // The spread is inside the `try` because it runs `meta`'s own getters.
-      line = JSON.stringify({ ...meta, level, time, message }, redact.replacer(errorReplacer()));
+      line = JSON.stringify({ ...fields, level, time, message }, redact.replacer(errorReplacer()));
     } catch {
       // A logger must never take down the process it is reporting on. Reachable through a
       // throwing getter or a throwing `toJSON()` on something in `meta` — and the flag is there

@@ -322,6 +322,13 @@ host outside the URL.
     `logger.error`. A getter one level down was fine, because `JSON.stringify` runs that one
     inside the `try`, and that nested case was the only one the test tried.
 
+    **An `Error` passed as the whole of `meta` is filed under `error`.** Spread, it contributes
+    nothing: `message` and `stack` are not enumerable, so `.catch((err) => logger.error("…", err))`
+    wrote a line that said something failed and nothing about what. `err` is `any` in a promise's
+    catch, so no type caught it. Swept on 2026-09-24 before a backend moved onto this logger: 429
+    calls in four repos pass the caught error that way, because their own loggers took it. A
+    migration that inherits that shape would have emptied every one of those lines.
+
 27. **`assertEveryRouteGuarded` probes the router, and refuses an app with no endpoints.** It asks
     the real matcher which handlers run before each route, rather than reading the code, so a guard
     mounted on the wrong prefix is caught. The empty-app refusal is the important line: a check over
