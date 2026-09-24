@@ -26,6 +26,7 @@ import {
   safeEqual,
   signToken,
   signWebhook,
+  validateEnv,
   verifyToken,
   verifyWebhook,
 } from "./index.ts";
@@ -361,5 +362,29 @@ describe("README — a link that proves who it is for", () => {
       ok: false,
       reason: "bad-signature",
     });
+  });
+});
+
+describe("README — the environment", () => {
+  it("stops the boot with every problem and the fix, and no value", () => {
+    const run = () =>
+      validateEnv(
+        { SESSION_SECRET: "your-session-secret", SMTP_HOST: "" },
+        {
+          required: ["DATABASE_URL", "SESSION_SECRET"],
+          groups: { SMTP_HOST: ["SMTP_USER", "SMTP_PASS"] },
+          secrets: { SESSION_SECRET: 32 },
+          fix: "Copy apps/api/.env.example to apps/api/.env and fill it in.",
+        },
+      );
+    expect(run).toThrow(
+      [
+        "The environment has 2 problems:",
+        "- These are not set: DATABASE_URL",
+        "- SESSION_SECRET looks like a placeholder from .env.example. Put the real secret there.",
+        "Copy apps/api/.env.example to apps/api/.env and fill it in.",
+      ].join("\n"),
+    );
+    expect(run).not.toThrow("your-session-secret");
   });
 });

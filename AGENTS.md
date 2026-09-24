@@ -64,6 +64,7 @@ serverkit/
 │       ├── webhook.ts    ← sign and verify, in Stripe's one-header format and Standard Webhooks
 │       ├── seal.ts       ← createSealer(): AES-GCM for a secret you store, with a key id to rotate
 │       ├── token.ts      ← signToken() and verifyToken(): a link that proves who it is for
+│       ├── env.ts        ← validateEnv(): every problem with the environment, in one error
 │       └── node/         ← the one directory allowed Node: fetchPublic(), and scryptSealKey()
 ├── scripts/
 │   └── check-release.ts  ← packs each package and checks what the registry would get
@@ -212,7 +213,7 @@ both Bun 1.3.8 and Node 22. It is the driver's, not the runner's, and `describeT
 brackets is still right for the guard. Someone on IPv6 loopback writes `localhost` or passes the
 host outside the URL.
 
-### …and nineteen for `@gusnips/server`
+### …and twenty for `@gusnips/server`
 
 21. **A success builder returns an ANSWER, not a body — so on Hono, import the adapters.** `ok`,
     `created`, `paginated` and `noContent` in `responses.ts` answer `{ status, body }`, because the
@@ -570,6 +571,23 @@ Unhandled error event:", ...)` and returns — it never emits, so Node's throw i
     into a page. One design binds an outside value, a username, into its signature. Here that would
     be a hole: MAC-ing `<payload>.<value>` lets a caller who picks the value move the expiry into it
     and drop it. So the value goes in the payload and is compared after verifying.
+
+40. **The environment is checked in one pass, with no value in any message, and a placeholder secret
+    stops the boot.** Twelve validators in the fleet, 30 to 60 lines of mechanism each; the list of
+    variables stays with the product. One threw at the first problem, so a box with two took two
+    restarts. One said a value must never reach the message, because a connection URL carries a
+    password, and the kit's messages hold names and lengths only. None of the twelve refused the
+    value its own `.env.example` ships. The shapes were measured on the secret lines of every
+    `.env.example` the fleet commits: `your-…` (also behind a vendor prefix, `sk-your-…`), `<…>`, `…-xxx`,
+    `generate-…`, `change-me` and `dev-only`. A length floor does not catch them: the `JWT_SECRET`
+    two repos carry in their self-hosted Supabase example is
+    `your-super-secret-jwt-token-with-at-least-32-characters`, 55 characters written to pass the
+    floor it is checked against, and one repo's example key passes that repo's own 32-character
+    floor. So `secrets` refuses the shape before it measures the length. Only keys named as secrets
+    are checked for a placeholder: a secret is random, so a word in it is a placeholder, where
+    `EMAIL_FROM` holds words and brackets by design. The source is an argument, because a Worker has
+    no `process.env`, and a Worker binding counts as set. Nothing turns the check off: one copy
+    returned early under `NODE_ENV=test`.
 
 ## What the build measured
 

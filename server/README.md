@@ -827,6 +827,43 @@ verdict.payload; // userId
 Without `ttlSecs`, a token is `<base64url(payload)>.<signature>`, keyed by the HMAC of the secret
 and the purpose. Links you signed that way by hand keep verifying after you switch.
 
+## The environment
+
+Check the environment first thing at boot. A box with a wrong `.env` then stops with a list of
+what to change, instead of failing one request at a time:
+
+```ts
+import { validateEnv } from "@gusnips/server";
+
+validateEnv(process.env, {
+  required: ["DATABASE_URL", "SESSION_SECRET"],
+  groups: { SMTP_HOST: ["SMTP_USER", "SMTP_PASS"] },
+  secrets: { SESSION_SECRET: 32 },
+  fix: "Copy apps/api/.env.example to apps/api/.env and fill it in.",
+});
+```
+
+With `DATABASE_URL` missing and `SESSION_SECRET` still the example's value, it throws an
+`EnvError` whose message is:
+
+```text
+The environment has 2 problems:
+- These are not set: DATABASE_URL
+- SESSION_SECRET looks like a placeholder from .env.example. Put the real secret there.
+Copy apps/api/.env.example to apps/api/.env and fill it in.
+```
+
+- **Every problem is in one error**, so you fix a box in one edit, not one restart per variable.
+- **No value is ever in it.** A connection URL carries a password, and this goes to a boot log.
+- **`groups`:** once `SMTP_HOST` is set, `SMTP_USER` and `SMTP_PASS` must be set too. Mail left
+  off is fine; mail set up halfway stops the boot.
+- **`secrets`** gives each secret the fewest characters it may have, and refuses the shapes a
+  placeholder takes: `your-…`, `<…>`, `…-xxx`, `generate-…`, `change-me` and `dev-only`. A
+  placeholder that boots signs and verifies like a real secret, and anyone who has read your
+  `.env.example` can forge with it.
+- **`check`** adds your own rules to the same list. Return a line per problem, with no value in it.
+- In a Worker, pass its `env`. `envProblems` returns the same list without throwing, for a test.
+
 ## What this package does not ship
 
 Each of these was measured, not assumed.
@@ -852,6 +889,7 @@ Each of these was measured, not assumed.
 - A code→status map that is not `as const` is refused.
 - A code outside your map, or a message key outside your union, does not compile.
 - A webhook checked while no secret is set is refused, never passed.
+- A secret still set to its `.env.example` placeholder stops the boot.
 
 ## Develop
 

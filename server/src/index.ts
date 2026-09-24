@@ -46,3 +46,5 @@ export { createSealer, SealError } from "./seal.ts";
 export type { Sealer, SealerOptions, SealErrorReason, SealKey } from "./seal.ts";
 export { signToken, verifyToken } from "./token.ts";
 export type { TokenRefusalReason, TokenVerdict } from "./token.ts";
+export { EnvError, envProblems, validateEnv } from "./env.ts";
+export type { EnvSpec } from "./env.ts";
