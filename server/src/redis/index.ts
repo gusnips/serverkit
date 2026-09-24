@@ -18,6 +18,9 @@
  */
 import IORedis, { type RedisOptions } from "ioredis";
 
+export { redisWindowStore } from "./window-store.ts";
+export type { RedisWindowStoreOptions, WindowPipeline } from "./window-store.ts";
+
 export interface CreateRedisOptions extends RedisOptions {
   /**
    * `REDIS_URL`. Omit it to connect from the other options instead — `host`, `port`, `db`,
