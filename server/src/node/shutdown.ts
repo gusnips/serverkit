@@ -48,7 +48,7 @@ export type Shutdown = (reason: string, exitCode?: number) => Promise<void>;
  *     shutdown = createShutdown(
  *       [
  *         bunServerStep(server, { graceMs: 5_000 }),
- *         { name: "redis", run: () => redis.quit() },
+ *         { name: "redis", run: () => quitRedis(redis) }, // from `@gusnips/server/redis`
  *         { name: "postgres", run: () => pool.end() },
  *       ],
  *       { hardExitMs: 25_000, logger },

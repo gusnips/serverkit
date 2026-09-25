@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { createLogger } from "../logger/index.ts";
+import { quitRedis } from "../redis/index.ts";
 import { bunServerStep, createShutdown, type Shutdown, type ShutdownStep } from "./shutdown.ts";
 
 function harness(steps: ShutdownStep[], hardExitMs = 5_000) {
@@ -250,7 +251,11 @@ describe("README — stopping for a deploy", () => {
   it("stops taking work, closes Redis, then Postgres, and exits 0", async () => {
     const closed: string[] = [];
     const server = { stop: async () => void closed.push("server") };
-    const redis = { quit: async () => void closed.push("redis") };
+    const redis = {
+      status: "ready" as const,
+      quit: async () => (closed.push("redis"), "OK" as const),
+      disconnect: () => {},
+    };
     const pool = { end: async () => void closed.push("postgres") };
     const exits: number[] = [];
     const options = {
@@ -263,7 +268,7 @@ describe("README — stopping for a deploy", () => {
     shutdown = createShutdown(
       [
         bunServerStep(server, { graceMs: 5_000 }),
-        { name: "redis", run: () => redis.quit() },
+        { name: "redis", run: () => quitRedis(redis) },
         { name: "postgres", run: () => pool.end() },
       ],
       options,

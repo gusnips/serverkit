@@ -191,6 +191,46 @@ export async function assertRedisReachable(
   );
 }
 
+export interface QuitRedisOptions {
+  /** How long `QUIT` may take before the socket is simply closed. */
+  timeoutMs?: number;
+}
+
+/**
+ * Shutdown: a bounded `QUIT`, then the socket closed whatever happened. Never throws.
+ *
+ * **A bare `quit()` can hold a drain until the process manager kills it, two ways.** With Redis
+ * unreachable and a command waiting in ioredis's offline queue — the `PING` a health probe gave up
+ * on — `quit()` resolves only once that queue is empty, and it never empties. And with Redis
+ * frozen rather than gone, a paused process or a stalled VM, the socket stays open and `QUIT` is
+ * never answered. Either way every step after it, Postgres included, never runs. Two backends in
+ * the fleet found it on the same day; both had `quit().catch(() => disconnect())`, which catches a
+ * rejection and not a hang.
+ *
+ * A connection that is not ready has nothing to flush, so it closes at once.
+ */
+export async function quitRedis(
+  redis: Pick<IORedis, "status" | "quit" | "disconnect">,
+  { timeoutMs = 1_000 }: QuitRedisOptions = {},
+): Promise<void> {
+  if (redis.status !== "ready") {
+    redis.disconnect();
+    return;
+  }
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const answered = await Promise.race([
+    redis.quit().then(
+      () => true,
+      () => false,
+    ),
+    new Promise<false>((resolve) => {
+      timer = setTimeout(() => resolve(false), timeoutMs);
+    }),
+  ]);
+  clearTimeout(timer);
+  if (!answered) redis.disconnect();
+}
+
 /** The host of a Redis URL, and never its password. Answers a readable placeholder rather than
  *  throwing, because this only ever runs while something is already failing. */
 function redisHost(url: string | undefined): string {

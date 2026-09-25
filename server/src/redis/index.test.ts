@@ -1,6 +1,8 @@
+import { createServer, type AddressInfo, type Socket } from "node:net";
 import IORedis from "ioredis";
 import { describe, expect, it, vi } from "vitest";
-import { assertRedisReachable, createRedis, pingRedis } from "./index.ts";
+import { freePort } from "../__tests__/redis-server.ts";
+import { assertRedisReachable, createRedis, pingRedis, quitRedis } from "./index.ts";
 
 /** `lazyConnect` so nothing dials while these run. Every assertion below needs no Redis. */
 function client(overrides: Record<string, unknown> = {}) {
@@ -206,5 +208,103 @@ describe("what onError is actually for", () => {
     );
     raw.disconnect();
     spy.mockRestore();
+  });
+});
+
+/** Whether `promise` settles within `ms`, either way. */
+function settlesWithin(ms: number, promise: Promise<unknown>): Promise<boolean> {
+  return Promise.race([
+    promise.then(
+      () => true,
+      () => true,
+    ),
+    new Promise<boolean>((resolve) => setTimeout(() => resolve(false), ms)),
+  ]);
+}
+
+/** Redis unreachable, with a PING waiting in the offline queue, as a health probe leaves one. */
+async function unreachableWithAWaitingPing() {
+  const redis = createRedis({ url: `redis://127.0.0.1:${await freePort()}`, onError: () => {} });
+  redis.ping().catch(() => {});
+  return redis;
+}
+
+/** A Redis that accepted the connection and then froze: nothing it is sent is ever answered. */
+async function frozenRedis() {
+  const sockets = new Set<Socket>();
+  const server = createServer((socket) => void sockets.add(socket));
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const { port } = server.address() as AddressInfo;
+  // No ready check and no CLIENT SETINFO, so the connection is "ready" once the socket opens:
+  // the same state as a real Redis that answered those and froze afterwards.
+  const redis = createRedis({
+    url: `redis://127.0.0.1:${port}`,
+    enableReadyCheck: false,
+    disableClientInfo: true,
+    onError: () => {},
+  });
+  await new Promise((resolve) => redis.once("ready", resolve));
+  const close = () => {
+    for (const socket of sockets) socket.destroy();
+    server.close();
+  };
+  return { redis, close };
+}
+
+describe("quitRedis", () => {
+  // The two controls pin the ioredis behaviour the function exists for. When one stops holding,
+  // that half of the doc comment is out of date.
+  it("is guarding against ioredis: quit() waits on the offline queue", async () => {
+    const redis = await unreachableWithAWaitingPing();
+    expect(await settlesWithin(300, redis.quit())).toBe(false);
+    redis.disconnect();
+  });
+
+  it("is guarding against a frozen Redis: QUIT is never answered", async () => {
+    const { redis, close } = await frozenRedis();
+    expect(await settlesWithin(300, redis.quit())).toBe(false);
+    redis.disconnect();
+    close();
+  });
+
+  it("closes at once when Redis is unreachable and a command is waiting", async () => {
+    const redis = await unreachableWithAWaitingPing();
+    expect(await settlesWithin(100, quitRedis(redis))).toBe(true);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(redis.status).toBe("end");
+  });
+
+  it("closes the socket after the bound when Redis is frozen", async () => {
+    // The socket closes only once the peer answers the FIN, and a frozen one never does, so what
+    // this can assert is that the drain moves on and the socket was told to close.
+    const { redis, close } = await frozenRedis();
+    const disconnect = vi.spyOn(redis, "disconnect");
+    const started = Date.now();
+    await quitRedis(redis, { timeoutMs: 200 });
+    expect(Date.now() - started).toBeGreaterThanOrEqual(190);
+    expect(disconnect).toHaveBeenCalledOnce();
+    close();
+  });
+
+  it("sends QUIT and leaves the socket alone when Redis answers", async () => {
+    const calls: string[] = [];
+    await quitRedis({
+      status: "ready",
+      quit: async () => (calls.push("quit"), "OK" as const),
+      disconnect: () => void calls.push("disconnect"),
+    });
+    expect(calls).toEqual(["quit"]);
+  });
+
+  it("closes the socket when QUIT is refused, and does not throw", async () => {
+    const calls: string[] = [];
+    await quitRedis({
+      status: "ready",
+      quit: async () => {
+        throw new Error("Connection is closed.");
+      },
+      disconnect: () => void calls.push("disconnect"),
+    });
+    expect(calls).toEqual(["disconnect"]);
   });
 });

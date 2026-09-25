@@ -653,6 +653,18 @@ in one repo and not the next. Three backends wrote this gate: two said "check RE
 third named the tool, and the third is the only one a reader can act on without knowing the repo
 already.
 
+Close it with `quitRedis` when the process stops:
+
+```ts
+{ name: "redis", run: () => quitRedis(redis) }
+```
+
+A bare `redis.quit()` can hang the drain in two ways. If Redis is down and a command is still
+waiting to be sent, `quit()` waits for that command first, and it is never sent. If Redis is frozen,
+`QUIT` gets no answer. Either way the steps after it, Postgres included, never run, and your process
+manager kills the process at its timeout. `quitRedis` sends `QUIT`, waits up to a second, then
+closes the socket. It never throws.
+
 The client **singleton** stays yours, for the same reason the pool's does: a package that holds
 it decides when your process can exit.
 
@@ -1395,6 +1407,7 @@ import {
   installProcessHandlers,
   type Shutdown,
 } from "@gusnips/server/node";
+import { quitRedis } from "@gusnips/server/redis";
 
 // First, before anything that can throw.
 let shutdown: Shutdown = createShutdown([], { hardExitMs: 25_000, logger });
@@ -1405,7 +1418,7 @@ installProcessHandlers((reason, code) => shutdown(reason, code), { logger, rejec
 shutdown = createShutdown(
   [
     bunServerStep(server, { graceMs: 5_000 }),
-    { name: "redis", run: () => redis.quit() },
+    { name: "redis", run: () => quitRedis(redis) },
     { name: "postgres", run: () => pool.end() },
   ],
   { hardExitMs: 25_000, logger },
