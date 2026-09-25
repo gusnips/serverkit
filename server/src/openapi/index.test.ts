@@ -283,6 +283,31 @@ describe("buildOpenApi", () => {
   });
 });
 
+describe("the envelope", () => {
+  it("names meta beside data when told what it holds, and never requires it", () => {
+    const success = (
+      doc: ReturnType<typeof buildOpenApi>,
+    ): { required: string[]; properties: Record<string, unknown> } =>
+      JSON.parse(JSON.stringify(op(doc, "/numbers/{id}/pair", "post").responses["201"]?.content))[
+        "application/json"
+      ].schema;
+    const total = { type: "object", properties: { total: { type: "integer" } } };
+    const withMeta = success(buildOpenApi([pair], { ...options, meta: total }));
+    expect(withMeta.required).toEqual(["data"]);
+    expect(withMeta.properties["meta"]).toEqual(total);
+    expect(success(buildOpenApi([pair], options)).properties).not.toHaveProperty("meta");
+  });
+
+  it("lists the error codes, so a client can switch on one", () => {
+    const codes = ["NOT_FOUND", "RATE_LIMIT_EXCEEDED"];
+    const doc = buildOpenApi([pair], { ...options, errorCodes: codes });
+    const error = doc.components.schemas["ApiError"]?.["properties"];
+    expect(JSON.stringify(error)).toContain('"enum":["NOT_FOUND","RATE_LIMIT_EXCEEDED"]');
+    const open = buildOpenApi([pair], options).components.schemas["ApiError"];
+    expect(JSON.stringify(open)).not.toContain("enum");
+  });
+});
+
 describe("translateProse", () => {
   const upper = (text: string) => text.toUpperCase();
 

@@ -1218,6 +1218,10 @@ app.get("/openapi.json", (c) => reference(c.req.query("lang")));
   `fixed`, and they stay out of the reference.
 - **Every refusal points at one `ApiError` schema**, the `{ error }` envelope. A 409, a 429 and a
   503 also document `Retry-After`, because those are the ones this package's own code sends it on.
+  Pass `errorCodes` with every code your API answers with, and the schema lists them, so a
+  generated client can switch on one.
+- **`meta` sits beside `data`** when you say what it holds: `meta: PageMetaSchema` names it on
+  every success, as optional.
 - **Schemas are zod 4.4 or later, any other Standard JSON Schema, or plain JSON Schema.** A type
   JSON cannot carry, such as a `Date`, is written as `{}` instead of failing the whole reference.
   A schema that refers to itself throws, because inside the document its `$ref` would point at the

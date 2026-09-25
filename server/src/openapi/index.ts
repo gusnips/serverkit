@@ -110,6 +110,16 @@ export interface OpenApiOptions {
   securitySchemes: Readonly<Record<string, JsonObject>>;
   /** Refusals any operation can answer, by status: `{ 401: "The key is missing or wrong." }`. */
   errors?: Readonly<Record<number, string>>;
+  /**
+   * Every `code` your API answers with. The `ApiError` schema lists them, so a generated client
+   * can switch on a code and a typo in one fails to compile. Absent, a code is any string.
+   */
+  errorCodes?: readonly string[];
+  /**
+   * What `meta` may hold beside `data`, such as a page's `total` or what a call cost. Every
+   * success names it as optional. Absent, the success names only `data`.
+   */
+  meta?: SchemaSource;
   /** Also list each operation that is not `restOnly` under `x-mcp-tools`, once per name. */
   mcpTools?: boolean;
 }
@@ -133,7 +143,7 @@ export interface OpenApiDocument {
 }
 
 /** The `{ error }` envelope every refusal answers with, from `@gusnips/http`. */
-const API_ERROR: JsonObject = {
+const apiError = (codes: readonly string[] | undefined): JsonObject => ({
   type: "object",
   required: ["error"],
   properties: {
@@ -141,7 +151,11 @@ const API_ERROR: JsonObject = {
       type: "object",
       required: ["code", "message"],
       properties: {
-        code: { type: "string", description: "What went wrong, as a word a program can check." },
+        code: {
+          type: "string",
+          ...(codes !== undefined && { enum: [...codes] }),
+          description: "What went wrong, as a word a program can check.",
+        },
         message: { type: "string", description: "What went wrong, as a sentence." },
         messageKey: { type: "string" },
         params: { type: "object", additionalProperties: { type: ["string", "number"] } },
@@ -149,7 +163,7 @@ const API_ERROR: JsonObject = {
       },
     },
   },
-};
+});
 
 /**
  * The statuses where this package's own code states a wait: a request with the same idempotency
@@ -181,6 +195,8 @@ export function buildOpenApi(
   const idsSeenAt = new Map<string, string>();
   const tools: McpToolCard[] = [];
   const toolNames = new Set<string>();
+  const meta =
+    options.meta === undefined ? undefined : jsonSchemaOf(options.meta, "output", "`meta`");
 
   for (const op of operations) {
     const where = `${op.method.toUpperCase()} ${op.path}`;
@@ -217,6 +233,7 @@ export function buildOpenApi(
               required: ["data"],
               properties: {
                 data: op.response === undefined ? {} : jsonSchemaOf(op.response, "output", where),
+                ...(meta !== undefined && { meta }),
               },
             },
             ...(op.example !== undefined && { example: { data: op.example } }),
@@ -262,7 +279,7 @@ export function buildOpenApi(
     tags: [...options.tags],
     paths,
     components: {
-      schemas: { ApiError: API_ERROR },
+      schemas: { ApiError: apiError(options.errorCodes) },
       securitySchemes: { ...options.securitySchemes },
     },
     ...(options.mcpTools && { "x-mcp-tools": tools }),
