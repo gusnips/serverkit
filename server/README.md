@@ -759,11 +759,10 @@ A limit in front of sign-in counts per address, and the address has to be one th
 make up:
 
 ```ts
-import { getConnInfo } from "hono/bun";
 import { ipSubject, memoryWindowStore } from "@gusnips/server";
-import { clientIp, rateLimit } from "@gusnips/server/hono";
+import { bunPeer, clientIp, rateLimit } from "@gusnips/server/hono";
 
-app.use(clientIp({ peerOf: (c) => getConnInfo(c).remote.address }));
+app.use(clientIp({ peerOf: bunPeer }));
 app.use(
   "/auth/*",
   rateLimit<AppEnv>({
@@ -790,8 +789,11 @@ app.use(
   `?? "unknown"` if you would rather count those together.
 - **`ipSubject` counts an IPv6 address by its /56**, the network one customer is usually given.
   Counted by the full address, one customer has 2^64 fresh windows. IPv4 is left as it is.
-- A `peerOf` that throws reads as no peer. `hono/bun`'s `getConnInfo` throws for every
-  `app.request()` in a test, so your tests run through it and see `null`.
+- **`bunPeer`, not `hono/bun`.** It reads the address `hono/bun`'s `getConnInfo` reads, from the
+  server Bun hands `fetch`, without importing `hono/bun`. That import reads the `Bun` global as
+  it loads, so an app file that has it cannot load at all in a test run under Node. In a test's
+  `app.request()` there is no server, so `clientIp` is `null` and the limiters let it through. On
+  another runtime, pass its own `getConnInfo`: a `peerOf` that throws reads as no peer.
 
 **The memory store counts per process** and starts again on every deploy. That is right for a
 burst limit in front of an auth round trip. It tracks 50,000 windows at most, and past that it

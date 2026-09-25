@@ -625,6 +625,14 @@ Unhandled error event:", ...)` and returns — it never emits, so Node's throw i
     `"unknown"`: seven readers put every such request in one window that one caller could fill for
     everyone.
 
+    **The README's recipe for that peer could not load in a test, and five adopters found it
+    separately.** It imported `getConnInfo` from `hono/bun`, whose `ssg.js` reads the `Bun` global
+    at module scope, so under vitest on Node the app file failed on its import, before the
+    throwing `peerOf` above could help. Measured on hono 4.13.3 and 4.13.8. Two adopters threaded
+    `peerOf` into their app factory from the entry point; one read `c.env.requestIP` itself behind
+    hand-typed bindings. `bunPeer` is that read, imports nothing, and answers `undefined` where
+    there is no server, so the recipe is one line on every runtime a test runs on.
+
 37. **A webhook is checked against its age and against every signature in it, and an unset secret
     refuses.** Three verifiers in the fleet never compared the timestamp to the clock, one of them
     the recipe a product publishes to its customers, so a captured delivery passed forever. Standard
