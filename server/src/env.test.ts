@@ -115,6 +115,7 @@ describe("envProblems", () => {
       "your-smtp-password",
       "sk-your-deepseek-key",
       "your_api_key",
+      "sk_test_your_stripe_secret_key_0123456789",
       "generate-a-random-secret",
       "dev-egress-secret-change-me",
       "changeme",

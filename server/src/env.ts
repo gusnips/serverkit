@@ -47,7 +47,8 @@ export interface EnvSpec<Source extends object> {
  */
 const PLACEHOLDERS = [
   /^<.*>$/s, // <generate: openssl rand -base64 32>
-  /\byour[-_]/i, // your-smtp-password, sk-your-deepseek-key
+  // Not `\b`: `_` is a word character, so `\byour` misses the one after `sk_test_`.
+  /(?:^|[^a-z0-9])your[-_]/i, // your-smtp-password, sk-your-deepseek-key, sk_test_your_key
   /^generate[-_: ]/i, // generate-a-random-secret
   /change-?me/i, // dev-egress-secret-change-me
   /dev-only/i, // dev-only-key-not-for-the-box-0123456789abcdef

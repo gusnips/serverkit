@@ -1373,9 +1373,9 @@ Copy apps/api/.env.example to apps/api/.env and fill it in.
 - **`groups`:** once `SMTP_HOST` is set, `SMTP_USER` and `SMTP_PASS` must be set too. Mail left
   off is fine; mail set up halfway stops the boot.
 - **`secrets`** gives each secret the fewest characters it may have, and refuses the shapes a
-  placeholder takes: `your-…`, `<…>`, `…-xxx`, `generate-…`, `change-me` and `dev-only`. A
-  placeholder that boots signs and verifies like a real secret, and anyone who has read your
-  `.env.example` can forge with it.
+  placeholder takes: `your-…` (also after a vendor prefix, as in `sk_test_your_…`), `<…>`,
+  `…-xxx`, `generate-…`, `change-me` and `dev-only`. A placeholder that boots signs and verifies
+  like a real secret, and anyone who has read your `.env.example` can forge with it.
 - **A secret that is set is checked, even when its group is off.** Leave `SMTP_HOST` unset with a
   placeholder still in `SMTP_PASS`, and the boot stops. That is on purpose: the spec knows which
   keys go together, not which code reads them, and a webhook route mounted either way still
