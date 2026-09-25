@@ -116,6 +116,51 @@ describe("buildOpenApi", () => {
     });
   });
 
+  it("documents the headers an operation reads, after its path and with the route's own schema", () => {
+    const keyed: OpenApiOperation = {
+      ...pair,
+      headers: [
+        {
+          name: "Idempotency-Key",
+          description: "Send the same key to get the first answer back.",
+          schema: z.string().max(255),
+        },
+        { name: "X-Trace", description: "Yours to follow.", required: true },
+      ],
+    };
+    const post = op(buildOpenApi([keyed], options), "/numbers/{id}/pair", "post");
+    expect(post.parameters).toEqual([
+      expect.objectContaining({ name: "id", in: "path" }),
+      {
+        name: "Idempotency-Key",
+        in: "header",
+        required: false,
+        description: "Send the same key to get the first answer back.",
+        schema: { type: "string", maxLength: 255 },
+      },
+      {
+        name: "X-Trace",
+        in: "header",
+        required: true,
+        description: "Yours to follow.",
+        schema: { type: "string" },
+      },
+    ]);
+    // The body is untouched: a header is not a field.
+    expect(post.requestBody?.content["application/json"].schema["properties"]).toHaveProperty(
+      "method",
+    );
+    const translated = op(
+      translateProse(buildOpenApi([keyed], options), (text) => text.toUpperCase()),
+      "/numbers/{id}/pair",
+      "post",
+    );
+    expect(translated.parameters?.[1]).toMatchObject({
+      name: "Idempotency-Key",
+      description: "SEND THE SAME KEY TO GET THE FIRST ANSWER BACK.",
+    });
+  });
+
   it("sends a read's fields in the query string, required only where the schema requires them", () => {
     const get = op(buildOpenApi([list], options), "/numbers", "get");
     expect(get.parameters?.map(({ name, in: at, required }) => [name, at, required])).toEqual([

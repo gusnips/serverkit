@@ -68,6 +68,11 @@ export interface OpenApiOperation {
   params?: Readonly<Record<string, string>>;
   /** Fields the route fills in itself, such as a `type` the path decides. Never documented. */
   fixed?: readonly string[];
+  /**
+   * Request headers the operation reads, such as an `Idempotency-Key`. The credential is not one:
+   * `securitySchemes` names it.
+   */
+  headers?: readonly OpenApiHeader[];
   /** What `data` holds when the call works. Absent, the document says only that it is there. */
   response?: SchemaSource;
   /** The success status. 200 by default. */
@@ -90,6 +95,16 @@ export interface OpenApiOperation {
    * written in every language unless `proseExtensions` names them.
    */
   extensions?: Record<`x-${string}`, unknown>;
+}
+
+/** A request header an operation reads. */
+export interface OpenApiHeader {
+  name: string;
+  description: string;
+  /** Absent, the header is optional. */
+  required?: boolean;
+  /** What the value may be. Pass the schema the route checks it with. Absent, any string. */
+  schema?: SchemaSource;
 }
 
 export interface OpenApiTag {
@@ -236,6 +251,16 @@ export function buildOpenApi(
       }
     }
     const input = op.input === undefined ? undefined : jsonSchemaOf(op.input, "input", where);
+    const headers = (op.headers ?? []).map((header) => ({
+      name: header.name,
+      in: "header",
+      required: header.required === true,
+      description: header.description,
+      schema:
+        header.schema === undefined
+          ? { type: "string" }
+          : jsonSchemaOf(header.schema, "input", `${where} header ${header.name}`),
+    }));
     const responses: JsonObject = {
       [String(op.status ?? 200)]: {
         description: op.summary,
@@ -268,7 +293,7 @@ export function buildOpenApi(
       tags: [op.tag],
       summary: op.summary,
       ...(op.description !== undefined && { description: op.description }),
-      ...inputParts(op, input, slots),
+      ...inputParts(op, input, slots, headers),
       security: op.keyless ? [] : schemeNames.map((name) => ({ [name]: [] })),
       responses,
       ...op.extensions,
@@ -374,8 +399,13 @@ function fieldsOf(schema: JsonObject): {
   return { properties, required };
 }
 
-/** Where each input field travels: the path, the query string, or the body. */
-function inputParts(op: OpenApiOperation, input: JsonObject | undefined, slots: string[]) {
+/** Where each input field travels: the path, the query string, or the body. Headers go after the path. */
+function inputParts(
+  op: OpenApiOperation,
+  input: JsonObject | undefined,
+  slots: string[],
+  headers: JsonObject[],
+) {
   const { properties, required } = input === undefined ? fieldsOf({}) : fieldsOf(input);
   const fixed = new Set(op.fixed);
   const fieldIn = new Map(slots.map((slot) => [slot, slot]));
@@ -395,6 +425,8 @@ function inputParts(op: OpenApiOperation, input: JsonObject | undefined, slots: 
       schema: field ?? { type: "string" },
     };
   });
+
+  parameters.push(...headers);
 
   const rest = Object.entries(properties).filter(([name]) => !inPath.has(name) && !fixed.has(name));
   if (readsQuery) {

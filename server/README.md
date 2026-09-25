@@ -1275,6 +1275,10 @@ app.get("/openapi.json", (c) => reference(c.req.query("lang")));
 - **A path slot may carry a field of another name.** `params: { numberId: "id" }` sends `numberId`
   in `/numbers/:id`. List fields the route fills in itself, such as a `type` the path decides, in
   `fixed`, and they stay out of the reference.
+- **Headers the operation reads go in `headers`**, such as the key that makes a retry safe:
+  `headers: [{ name: "Idempotency-Key", description: "…", schema: IdempotencyKey }]`. Pass the
+  schema the route checks the value with, so the reference and the route agree on the limit. The
+  credential is not a header here: `securitySchemes` names it.
 - **Every refusal points at one `ApiError` schema**, the `{ error }` envelope. A 409, a 429 and a
   503 also document `Retry-After`, because those are the ones this package's own code sends it on.
   Pass `errorCodes` with every code your API answers with, and the schema lists them, so a
