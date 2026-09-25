@@ -1411,7 +1411,9 @@ installProcessHandlers(shutdown, { logger, rejections: "survive" });
 - **`bunServerStep`** stops taking connections at once and gives the requests in flight `graceMs`
   to finish. An SSE stream never finishes on its own, so after that the step closes what is left.
 - **`installProcessHandlers`** drains on SIGTERM, on SIGINT (what pm2 sends) and on an uncaught
-  exception, and logs every crash through your logger. A second signal exits 1 at once.
+  exception, and logs every crash through your logger. A second signal exits 1 at once, unless it
+  comes within a second of the first: pm2 signals every process in the tree, and `bun run` forwards
+  SIGTERM to the app as well, so one stop can arrive twice.
 - **`rejections` is required.** `"survive"` logs a rejected promise nobody handled and keeps
   going, for an API whose requests share nothing. `"exit"` logs it and drains, for a worker, where
   a job that stopped halfway may have left bad state.

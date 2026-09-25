@@ -134,6 +134,9 @@ async function settlesWithin(ms: number, work: unknown): Promise<boolean> {
   }
 }
 
+/** How close a second stop signal may follow the first and still be the same stop. */
+const SAME_STOP_MS = 1_000;
+
 export interface ProcessHandlerOptions {
   logger: Pick<Logger, "error">;
   /**
@@ -153,9 +156,11 @@ export interface ProcessHandlerOptions {
  * An uncaught exception drains, then exits 1. Sixteen processes in the fleet exited at once, which
  * cut every healthy request in flight for one bug; the backstop bounds a drain the bug has broken.
  *
- * A second stop signal exits 1 at once. A process manager sends one and then SIGKILL, so a second
- * one comes from a person, and a person pressing Ctrl+C twice should not wait out a worker's
- * ten-minute budget.
+ * A second stop signal exits 1 at once, so a person pressing Ctrl+C twice does not wait out a
+ * worker's ten-minute budget. One that arrives within a second of the first is the same stop,
+ * delivered twice, and is ignored: pm2 signals every process in the tree, and a wrapper such as
+ * `bun run` forwards SIGTERM to its child too, so under `bun run start` the app got SIGTERM twice
+ * in the same millisecond (measured on Bun 1.4.2, Linux). Read as a person, that skipped the drain.
  */
 export function installProcessHandlers(shutdown: Shutdown, options: ProcessHandlerOptions): void {
   const { logger, rejections, signals = ["SIGTERM", "SIGINT"] } = options;
@@ -170,14 +175,15 @@ export function installProcessHandlers(shutdown: Shutdown, options: ProcessHandl
     logger.error("unhandled rejection", { error: reason });
     if (rejections === "exit") void shutdown("unhandled rejection", 1);
   });
-  let signalled = false;
+  let firstAt: number | undefined;
   for (const signal of signals)
     process.on(signal, () => {
-      if (signalled) {
+      if (firstAt !== undefined) {
+        if (Date.now() - firstAt < SAME_STOP_MS) return;
         logger.error("second stop signal, exiting without waiting for the drain", { signal });
         process.exit(1);
       }
-      signalled = true;
+      firstAt = Date.now();
       void shutdown(signal);
     });
 }

@@ -142,7 +142,7 @@ const server = setInterval(() => {}, 1_000);
 const steps = [{ name: "server", run: () => clearInterval(server) }];
 // Holds no handle, so an unref'd backstop would let the process exit 0 here.
 if (mode === "hang") steps.push({ name: "stuck", run: () => new Promise(() => {}) });
-if (mode === "slow") steps.push({ name: "slow", run: () => new Promise((r) => setTimeout(r, 2_000)) });
+if (mode === "slow") steps.push({ name: "slow", run: () => new Promise((r) => setTimeout(r, 4_000)) });
 const shutdown = createShutdown(steps, { hardExitMs: mode === "hang" ? 300 : 5_000, logger });
 installProcessHandlers(shutdown, { logger, rejections: mode === "reject-exit" ? "exit" : "survive" });
 if (mode === "throw") setTimeout(() => { throw new Error("boom"); }, 10);
@@ -157,14 +157,23 @@ interface Run {
   lines: Record<string, unknown>[];
 }
 
-function run(runtime: string, mode: string, signals: NodeJS.Signals[] = []): Promise<Run> {
+/** Sends `signals` once the child is ready, each `gapMs` after the one before. */
+function run(
+  runtime: string,
+  mode: string,
+  signals: NodeJS.Signals[] = [],
+  gapMs = 0,
+): Promise<Run> {
   return new Promise((resolve, reject) => {
     const child = spawn(runtime, [FIXTURE, mode], { stdio: ["ignore", "pipe", "pipe"] });
     let out = "";
     child.stdout.on("data", (chunk: Buffer) => {
       out += chunk.toString();
       if (out.includes('"message":"ready"') && signals.length > 0) {
-        for (const signal of signals.splice(0)) child.kill(signal);
+        signals.splice(0).forEach((signal, i) => {
+          if (i === 0 || gapMs === 0) child.kill(signal);
+          else setTimeout(() => child.kill(signal), gapMs * i);
+        });
       }
     });
     child.on("error", reject);
@@ -200,11 +209,19 @@ describe.each([
   });
 
   it("exits 1 at once on a second signal", async () => {
-    const { code, messages } = await run(runtime, "slow", ["SIGTERM", "SIGINT"]);
+    const { code, messages } = await run(runtime, "slow", ["SIGTERM", "SIGINT"], 1_500);
     expect(code).toBe(1);
     expect(messages.at(-1)).toBe("second stop signal, exiting without waiting for the drain");
     expect(messages).not.toContain("shutdown complete");
   });
+
+  // pm2 signals the whole tree and `bun run` forwards SIGTERM, so the app gets it twice at once.
+  it("drains once when the same stop arrives twice at once", async () => {
+    const { code, messages } = await run(runtime, "slow", ["SIGTERM", "SIGTERM"]);
+    expect(code).toBe(0);
+    expect(messages.filter((message) => message === "shutting down")).toHaveLength(1);
+    expect(messages.at(-1)).toBe("shutdown complete");
+  }, 15_000);
 
   it("logs an uncaught exception, drains, and exits 1", async () => {
     const { code, lines } = await run(runtime, "throw");

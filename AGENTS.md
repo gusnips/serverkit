@@ -726,8 +726,14 @@ Unhandled error event:", ...)` and returns — it never emits, so Node's throw i
     rejection with only an `uncaughtException` listener exits 1 at once, skipping the drain,
     where Node hands it to that listener (measured on 1.3.8 and 1.4.2). An uncaught exception
     drains and exits 1 rather than exiting at once, because the backstop already bounds a drain
-    the bug has broken. A second signal exits 1 at once: a process manager sends one and then
-    SIGKILL, so the second comes from a person. The budget check stays in the adopter, because
+    the bug has broken. A second signal exits 1 at once, and one within a second of the first is
+    the same stop, ignored. This said "a process manager sends one and then SIGKILL, so the second
+    comes from a person", and that was false for the fleet's own wrapper: pm2 signals every process
+    in the tree (`treekill`), `bun run` forwards SIGTERM to its child too, and the app got SIGTERM
+    twice in the same millisecond (Bun 1.4.2, Linux), so the drain was skipped. pm2's default
+    SIGINT is not forwarded and arrived once, which is why nothing had shown it. Standard signals do
+    not queue, so on Node the pair can merge into one before the handler runs; the test that pins
+    this fails on Bun without the window. The budget check stays in the adopter, because
     only the adopter can read its process manager's config; the README gives the order.
 43. **A job is final when BullMQ says so, and a finished job is deleted unless you say otherwise.**
     Six `bullmq.ts` copies, four dead-letter files and five schedule syncs, 1,170 lines, and each
