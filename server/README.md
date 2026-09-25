@@ -1134,7 +1134,10 @@ both doors.
 
 - **A tool call answers what the REST route answers.** A success is `{ data }`, as one text block.
   A failure is the same `{ error }` body your `errorResponse` gives REST, marked `isError`. Pass
-  `present` to answer a success differently, for example with an image first.
+  `present` to answer a success differently, for example with an image first. It gets the call's
+  own `deps`, so an image the operation handed back on the side stays with that call, and it may
+  be async. A throw in `present` answers the call as failed after the work is done, so catch what
+  is only nice to have.
 - **A tool handler never throws.** The MCP SDK answers a throw with the error's own message, so
   `connect ECONNREFUSED 10.0.0.5:5432` reaches the agent and no log line sees it. Three of eight
   backends shipped that. `registerOperation` catches every failure: a 5xx and an unexpected throw

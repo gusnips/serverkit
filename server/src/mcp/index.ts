@@ -69,8 +69,13 @@ export interface ToolDoor<Deps> extends ToolErrorOptions {
    * POST can carry many calls, so a limit on the POST lets a batch through. `null` to go without.
    */
   beforeCall: ((tool: string, deps: Deps) => void | Promise<void>) | null;
-  /** The answer to a call that worked. By default the REST body, `{ data }`, as one text block. */
-  present?: (result: unknown, tool: string) => CallToolResult;
+  /**
+   * The answer to a call that worked. By default the REST body, `{ data }`, as one text block. It
+   * gets the call's own `deps`, so what an operation handed back on the side (an image to show, a
+   * cost) belongs to this call and no other, and it may be async. A throw here answers the call as
+   * failed after the operation already ran, so catch what is only nice to have.
+   */
+  present?: (result: unknown, tool: string, deps: Deps) => CallToolResult | Promise<CallToolResult>;
 }
 
 const textResult = (body: unknown, isError?: true): CallToolResult => ({
@@ -123,7 +128,7 @@ export function registerOperation<Deps>(
         const deps = await door.deps(extra);
         await door.beforeCall?.(name, deps);
         const result = await op.run(deps, args);
-        return door.present ? door.present(result, name) : textResult({ data: result });
+        return door.present ? await door.present(result, name, deps) : textResult({ data: result });
       } catch (err) {
         return toolError(err, name, door);
       }

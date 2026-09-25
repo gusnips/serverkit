@@ -230,6 +230,42 @@ describe("registerOperation", () => {
     expect(json).toMatchObject({ result: { content: [{ type: "image" }, { type: "text" }] } });
   });
 
+  it("hands present the call's own deps, and waits for it", async () => {
+    let calls = 0;
+    const { app } = harness({
+      // A fresh object per call, as a per-call side channel (an image to show) would be.
+      deps: () => ({ userId: `u_${++calls}` }),
+      present: async (result, tool, deps) => {
+        await new Promise((resolve) => setTimeout(resolve, 5));
+        return {
+          content: [{ type: "text", text: JSON.stringify({ tool, by: deps.userId, result }) }],
+        };
+      },
+    });
+    const { json } = await post(app, [call(1, { id: "a" }), call(2, { id: "b" })]);
+    const texts = (json as { result: { content: { text: string }[] } }[]).map(
+      (answer) => JSON.parse(answer.result.content[0]!.text) as unknown,
+    );
+    expect(texts).toEqual([
+      { tool: "get_place", by: "u_1", result: { id: "a", owner: "u_1" } },
+      { tool: "get_place", by: "u_2", result: { id: "b", owner: "u_2" } },
+    ]);
+  });
+
+  it("answers a present that throws as a failed call, logged, and never throws itself", async () => {
+    const { app, logs, unexpected } = harness({
+      // Async on purpose: a rejection returned without `await` escapes the handler's `catch`.
+      present: async () => {
+        throw new Error("preview encoder crashed at /srv/app/preview.ts:12");
+      },
+    });
+    const answer = await callTool(app, { id: "p_1" });
+    expect(answer).toMatchObject({ isError: true, body: { error: { code: "INTERNAL_ERROR" } } });
+    expect(answer.text).not.toContain("/srv/app");
+    expect(logs).toHaveLength(1);
+    expect(unexpected).toEqual(["get_place"]);
+  });
+
   it("registers a mixed list typed by the app's own operation layer, in one loop", async () => {
     // The shape an app's `defineOperation` returns: `run` as a property, and the schema typed.
     interface AppOperation<I, O> {
