@@ -19,6 +19,11 @@ transaction.
 | [`@gusnips/server`](server/README.md)   | errors, the response envelope, logging, and the API's edge    | nothing    |
 | [`@gusnips/sdkgen`](sdkgen/README.md)   | the parts of a script that writes your API's TypeScript SDK   | `prettier` |
 
+To see these next to frontkit's in one app, read the
+[guide](https://github.com/gusnips/frontkit/blob/main/GUIDE.md). It shows how we lay out a
+project, then builds a small app from an empty folder: an API on Hono and Postgres, and a web app
+on React.
+
 ## Why it exists
 
 Eleven apps each wrote their own migration runner, and ten wrote their own type generator: about
