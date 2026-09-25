@@ -746,7 +746,12 @@ Unhandled error event:", ...)` and returns — it never emits, so Node's throw i
     it. The handlers go in before boot, through a function
     that forwards to whichever drain exists: three adopters wrote that by hand in the first wave,
     because the steps need a server that does not exist yet and the donors' crash pair sat on the
-    first line, where a boot crash still reaches the log. The README's example now starts there.
+    first line. **The first line is not early enough, and this said it was.** Every import runs
+    before the body of the file that imports it, so an adopter whose modules build a client as they
+    load crashed before its handlers existed: printed raw, with no structured line and no drain. Its
+    fix is the README's example now: the handlers go in the entry's first import, which hands over
+    the real drain later through `drainWith`. A test boots an entry whose import throws, on Node and
+    Bun, with the handlers installed on the entry's first line as the control that must see nothing.
     The budget check stays in the adopter, because
     only the adopter can read its process manager's config; the README gives the order.
 43. **A job is final when BullMQ says so, and a finished job is deleted unless you say otherwise.**

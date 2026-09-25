@@ -1401,35 +1401,46 @@ A process manager stops your process with a signal, and kills it when its timeou
 between, finish the work in flight and close what it used, in order:
 
 ```ts
-import {
-  bunServerStep,
-  createShutdown,
-  installProcessHandlers,
-  type Shutdown,
-} from "@gusnips/server/node";
-import { quitRedis } from "@gusnips/server/redis";
+// crash-handlers.ts
+import { createShutdown, installProcessHandlers, type Shutdown } from "@gusnips/server/node";
+import { logger } from "./logger.ts";
 
-// First, before anything that can throw.
-let shutdown: Shutdown = createShutdown([], { hardExitMs: 25_000, logger });
-installProcessHandlers((reason, code) => shutdown(reason, code), { logger, rejections: "survive" });
+let drain: Shutdown = createShutdown([], { hardExitMs: 25_000, logger });
+installProcessHandlers((reason, code) => drain(reason, code), { logger, rejections: "survive" });
+
+export function drainWith(shutdown: Shutdown): void {
+  drain = shutdown;
+}
+```
+
+```ts
+// index.ts
+import { drainWith } from "./crash-handlers.ts"; // the first import
+import { bunServerStep, createShutdown } from "@gusnips/server/node";
+import { quitRedis } from "@gusnips/server/redis";
 
 // …check the env, open the pool and Redis, start the server…
 
-shutdown = createShutdown(
-  [
-    bunServerStep(server, { graceMs: 5_000 }),
-    { name: "redis", run: () => quitRedis(redis) },
-    { name: "postgres", run: () => pool.end() },
-  ],
-  { hardExitMs: 25_000, logger },
+drainWith(
+  createShutdown(
+    [
+      bunServerStep(server, { graceMs: 5_000 }),
+      { name: "redis", run: () => quitRedis(redis) },
+      { name: "postgres", run: () => pool.end() },
+    ],
+    { hardExitMs: 25_000, logger },
+  ),
 );
 ```
 
-- **Install the handlers first, and hand them the drain once it exists.** A crash while booting,
-  such as a port already taken or a bad env, is the one your log most needs, and the steps need a
-  server that does not exist yet. Until the real drain replaces it, the empty one logs the crash
-  and exits 1. On Bun 1.4.2 a throw at the top level and a rejected top-level `await` both reach
-  the handler.
+- **Install the handlers in the entry's first import, and hand them the drain once it exists.** A
+  crash while booting, such as a bad env or a port already taken, is the one your log most needs.
+  The entry's first line is too late for it: every import runs before the file that imports it,
+  so a module that throws as it loads, like an env check or a client built on import, crashes
+  before that line runs. The first import runs before the others. Keep its own imports to the kit
+  and a logger that does no work as it loads. Until `drainWith` hands over the real drain, the
+  empty one logs the crash and exits 1. On Node 24 and Bun 1.4.2, a throw while a module loads, a
+  throw at the top level and a rejected top-level `await` all reach the handler.
 
 - **The steps run once, in the order you list them.** Stop taking work first. Close the database
   last, because a request that is still finishing may still query it.

@@ -42,16 +42,23 @@ export type Shutdown = (reason: string, exitCode?: number) => Promise<void>;
 /**
  * Runs `steps` in order, once, then exits:
  *
- *     let shutdown: Shutdown = createShutdown([], { hardExitMs: 25_000, logger });
- *     installProcessHandlers((reason, code) => shutdown(reason, code), { logger, rejections: "survive" });
- *     // …boot: the env, the pool, Redis, the server…
- *     shutdown = createShutdown(
- *       [
- *         bunServerStep(server, { graceMs: 5_000 }),
- *         { name: "redis", run: () => quitRedis(redis) }, // from `@gusnips/server/redis`
- *         { name: "postgres", run: () => pool.end() },
- *       ],
- *       { hardExitMs: 25_000, logger },
+ *     // crash-handlers.ts, the entry's FIRST import: every import runs before the entry's body.
+ *     let drain: Shutdown = createShutdown([], { hardExitMs: 25_000, logger });
+ *     installProcessHandlers((reason, code) => drain(reason, code), { logger, rejections: "survive" });
+ *     export function drainWith(shutdown: Shutdown): void {
+ *       drain = shutdown;
+ *     }
+ *
+ *     // index.ts, once the server, Redis and the pool exist:
+ *     drainWith(
+ *       createShutdown(
+ *         [
+ *           bunServerStep(server, { graceMs: 5_000 }),
+ *           { name: "redis", run: () => quitRedis(redis) }, // from `@gusnips/server/redis`
+ *           { name: "postgres", run: () => pool.end() },
+ *         ],
+ *         { hardExitMs: 25_000, logger },
+ *       ),
  *     );
  */
 export function createShutdown(steps: readonly ShutdownStep[], options: ShutdownOptions): Shutdown {

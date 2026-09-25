@@ -355,6 +355,57 @@ describe.each([
   });
 });
 
+// Every import runs before the body of the file that imports it, so a module that throws as it
+// loads crashes before the entry's first line. The README installs the handlers in the entry's
+// first import instead; "body" is the control, installing them on the entry's first line.
+const BOOT = mkdtempSync(join(tmpdir(), "serverkit-boot-"));
+writeFileSync(
+  join(BOOT, "crash-handlers.mjs"),
+  `import { createShutdown, installProcessHandlers } from ${JSON.stringify(SHUTDOWN)};
+const log = (message, meta = {}) =>
+  console.log(JSON.stringify({ message, ...meta, error: meta.error && String(meta.error) }));
+const logger = { info: log, error: log };
+installProcessHandlers(createShutdown([], { hardExitMs: 5_000, logger }), { logger, rejections: "survive" });
+`,
+);
+writeFileSync(join(BOOT, "env.mjs"), `throw new Error("DATABASE_URL is missing");\n`);
+writeFileSync(join(BOOT, "first.mjs"), `import "./crash-handlers.mjs";\nimport "./env.mjs";\n`);
+writeFileSync(
+  join(BOOT, "body.mjs"),
+  `import "./env.mjs";\nawait import("./crash-handlers.mjs");\n`,
+);
+
+function boot(runtime: string, entry: string): Promise<{ code: number | null; out: string }> {
+  return new Promise((resolve, reject) => {
+    const child = spawn(runtime, [join(BOOT, entry)], { stdio: ["ignore", "pipe", "ignore"] });
+    let out = "";
+    child.stdout.on("data", (chunk: Buffer) => (out += chunk.toString()));
+    child.on("error", reject);
+    child.on("exit", (code) => resolve({ code, out }));
+  });
+}
+
+describe.each([
+  ["node", process.execPath],
+  ["bun", "bun"],
+])("a crash while a module loads, on %s", (_name, runtime) => {
+  it("is logged and drained when the handlers are the entry's first import", async () => {
+    const { code, out } = await boot(runtime, "first.mjs");
+    expect(code).toBe(1);
+    expect(JSON.parse(out.split("\n")[0] ?? "")).toEqual({
+      message: "uncaught exception",
+      error: "Error: DATABASE_URL is missing",
+    });
+    expect(out).toContain('"message":"shutdown complete","exitCode":1');
+  });
+
+  it("never reaches handlers installed on the entry's first line", async () => {
+    const { code, out } = await boot(runtime, "body.mjs");
+    expect(code).toBe(1);
+    expect(out).toBe("");
+  });
+});
+
 // The README's snippet. It lives here and not in readme.test.ts, whose program is the Worker's.
 describe("README — stopping for a deploy", () => {
   it("stops taking work, closes Redis, then Postgres, and exits 0", async () => {
