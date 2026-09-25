@@ -618,6 +618,14 @@ retry limit. So the default is right and it has a consequence worth saying once:
 check, a `queue.add()` — with Redis down, each waits rather than failing. Pass
 `maxRetriesPerRequest: 3` for a connection that serves ordinary commands instead of BullMQ's.
 
+A queue's first command also waits until its connection is ready, whatever the connection's retry
+options say. BullMQ's `skipWaitingForReady` does not help. On a connection with
+`enableOfflineQueue: false`, a queue built while the connection is still connecting fails its
+first add, and every add after it, even once Redis is up. We reproduced it with one backend's
+settings: an API that builds its queue on its first request loses that queue for as long as the
+process runs. So leave `skipWaitingForReady` off, and bound the `add()` of a queue built on first
+use, like the reads above.
+
 **A URL with options after its `?` is refused.** ioredis lets those beat the options you pass,
 and reads each as a string: `?maxRetriesPerRequest=7` replaces the `null` BullMQ needs, and
 `?enableOfflineQueue=false` is the string "false", which ioredis reads as on. Pass them to
@@ -1310,6 +1318,9 @@ await mailer.send({ to: user.email, subject: "Your code", text: `Your code is ${
 - **With no `host`, mail is off.** `mailer.enabled` is false, and `send` throws the error
   `whenDisabled` returns. A server without mail still starts, and a send says why it failed. Check
   `enabled` first where you would rather skip the send.
+- **A `host` with no `from` throws when you call `createMailer`**, not at the first send. A mailer
+  built at the top of a module therefore throws while the server is still loading. Put the From
+  key in your env check (`groups: { SMTP_HOST: ["SMTP_FROM"] }`), so the boot error names the key.
 - **Each wait is 15 seconds at most**: finding the server, connecting, its first reply, and any
   silence after that. nodemailer's own limits are 2 minutes to connect and 10 minutes of silence,
   and 12 of 13 backends kept them, some inside a request somebody was waiting on. Change it with
