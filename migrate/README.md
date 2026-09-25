@@ -79,7 +79,10 @@ top, instead.
 Any other flag is an error, and nothing runs. `--manual` without a terminal to ask on, and without
 `--yes`, is an error too.
 
-It reads `DATABASE_URL` and nothing else: no `.env` file. Pass one with `bun --env-file=.env`.
+It reads `DATABASE_URL` and nothing else, and never opens a `.env` file. The bin runs under Node,
+so `bunx gusnips-migrate` sees no `.env` either: set the variable in the shell, as above. A script
+you run with `bun`, like the one below, is different: Bun loads the `.env` in the folder you start
+it from.
 
 ## In a script
 

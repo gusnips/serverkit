@@ -535,6 +535,7 @@ CREATE INDEX idempotency_keys_created_at_idx ON app.idempotency_keys (created_at
 Then run each write through it:
 
 ```ts
+import { created } from "@gusnips/server/hono";
 import { createIdempotency } from "@gusnips/server/pg";
 
 const idempotency = createIdempotency(pool, {
@@ -551,7 +552,7 @@ if (outcome.kind === "running")
   throw errors.conflict("A request with this key is still running", { retryAfterSecs: 2 });
 if (outcome.kind === "mismatch")
   throw errors.keyReused("This key was already used for a different request. Send a new one.");
-return c.json(created(outcome.answer), 201);
+return created(c, outcome.answer);
 ```
 
 - **With no key, it just runs.** Nothing is stored.
