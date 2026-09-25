@@ -1321,6 +1321,8 @@ await mailer.send({ to: user.email, subject: "Your code", text: `Your code is ${
 - **A `host` with no `from` throws when you call `createMailer`**, not at the first send. A mailer
   built at the top of a module therefore throws while the server is still loading. Put the From
   key in your env check (`groups: { SMTP_HOST: ["SMTP_FROM"] }`), so the boot error names the key.
+  That only works when the check runs before the module that builds the mailer is loaded. If your
+  entry imports everything and checks the env afterwards, build the mailer on the first send.
 - **Each wait is 15 seconds at most**: finding the server, connecting, its first reply, and any
   silence after that. nodemailer's own limits are 2 minutes to connect and 10 minutes of silence,
   and 12 of 13 backends kept them, some inside a request somebody was waiting on. Change it with
