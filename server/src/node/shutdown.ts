@@ -16,7 +16,6 @@
  * - **One drain per process.** Ten APIs ran the whole sequence again on a second signal, and
  *   pg-pool's `end()` rejects when it is called a second time.
  */
-import type { Server } from "node:http";
 import type { Logger } from "../logger/index.ts";
 
 export interface ShutdownStep {
@@ -146,7 +145,11 @@ export function bunServerStep(
  * window runs out, the steps after it run anyway, and the request ends with the process.
  */
 export function nodeServerStep(
-  server: Pick<Server, "listening" | "close" | "closeAllConnections">,
+  server: {
+    listening: boolean;
+    close(callback: (error?: Error) => void): unknown;
+    closeAllConnections(): void;
+  },
   options: { graceMs: number; name?: string },
 ): ShutdownStep {
   const { graceMs, name = "http server" } = options;

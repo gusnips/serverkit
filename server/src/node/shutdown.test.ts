@@ -1,5 +1,6 @@
 import { spawn } from "node:child_process";
 import { mkdtempSync, writeFileSync } from "node:fs";
+import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -170,6 +171,11 @@ describe("nodeServerStep", () => {
     expect(step.name).toBe("http server");
     await step.run();
     expect(busy.calls).toEqual(["close", "closeAllConnections"]);
+  });
+
+  it("takes a real node:http server", () => {
+    // The parameter is structural; this is what keeps Express's server assignable to it.
+    expect(nodeServerStep(createServer(), { graceMs: 1 }).name).toBe("http server");
   });
 
   it("fails the step when close() fails", async () => {
