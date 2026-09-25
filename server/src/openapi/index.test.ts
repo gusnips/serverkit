@@ -321,6 +321,16 @@ describe("the envelope", () => {
     const open = buildOpenApi([pair], options).components.schemas["ApiError"];
     expect(JSON.stringify(open)).not.toContain("enum");
   });
+
+  it("describes every field of the error, so a generated reference leaves none bare", () => {
+    const described = z.object({ description: z.string().min(1) });
+    const envelope = z.object({
+      properties: z.object({ error: z.object({ properties: z.record(z.string(), described) }) }),
+    });
+    const schema = buildOpenApi([pair], options).components.schemas["ApiError"];
+    const fields = envelope.parse(schema).properties.error.properties;
+    expect(Object.keys(fields)).toEqual(["code", "message", "messageKey", "params", "details"]);
+  });
 });
 
 describe("translateProse", () => {

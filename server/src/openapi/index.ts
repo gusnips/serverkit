@@ -162,8 +162,16 @@ const apiError = (codes: readonly string[] | undefined): JsonObject => ({
           description: "What went wrong, as a word a program can check.",
         },
         message: { type: "string", description: "What went wrong, as a sentence." },
-        messageKey: { type: "string" },
-        params: { type: "object", additionalProperties: { type: ["string", "number"] } },
+        messageKey: {
+          type: "string",
+          description:
+            "`message` as a key, to show it in your reader's language, with `params` filling its blanks.",
+        },
+        params: {
+          type: "object",
+          additionalProperties: { type: ["string", "number"] },
+          description: "The values that fill `messageKey`'s blanks, such as a limit.",
+        },
         details: { description: "More about this error, such as retryAfterSecs." },
       },
     },
