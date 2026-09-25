@@ -1439,6 +1439,10 @@ shutdown = createShutdown(
   the process exits 1.
 - **`bunServerStep`** stops taking connections at once and gives the requests in flight `graceMs`
   to finish. An SSE stream never finishes on its own, so after that the step closes what is left.
+- **`nodeServerStep`** does the same for a `node:http` server, such as the one Express's
+  `app.listen()` returns. On Bun 1.4.2 it cannot cut a request that is still running:
+  `closeAllConnections()` leaves it open until its handler finishes. So the step waits `graceMs`
+  once more, then moves on, and that request ends with the process.
 - **`installProcessHandlers`** drains on SIGTERM, on SIGINT (what pm2 sends) and on an uncaught
   exception, and logs every crash through your logger. A second signal exits 1 at once, unless it
   comes within a second of the first: pm2 signals every process in the tree, and `bun run` forwards

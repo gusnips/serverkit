@@ -6,7 +6,13 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { createLogger } from "../logger/index.ts";
 import { quitRedis } from "../redis/index.ts";
-import { bunServerStep, createShutdown, type Shutdown, type ShutdownStep } from "./shutdown.ts";
+import {
+  bunServerStep,
+  createShutdown,
+  nodeServerStep,
+  type Shutdown,
+  type ShutdownStep,
+} from "./shutdown.ts";
 
 function harness(steps: ShutdownStep[], hardExitMs = 5_000) {
   const lines: string[] = [];
@@ -127,6 +133,103 @@ describe("bunServerStep", () => {
       "not listening",
     );
     expect(broken.calls).toEqual(["stop()", "stop(true)"]);
+  });
+});
+
+describe("nodeServerStep", () => {
+  function server(close: (done: (error?: Error) => void) => void, listening = true) {
+    const calls: string[] = [];
+    return {
+      calls,
+      listening,
+      close(done: (error?: Error) => void) {
+        calls.push("close");
+        close(done);
+        return this;
+      },
+      closeAllConnections: () => void calls.push("closeAllConnections"),
+    };
+  }
+
+  it("does nothing for a server that is not listening", async () => {
+    const stopped = server(() => {}, false);
+    await nodeServerStep(stopped, { graceMs: 20 }).run();
+    expect(stopped.calls).toEqual([]);
+  });
+
+  it("does not force a server that closed within the grace window", async () => {
+    const quiet = server((done) => done());
+    await nodeServerStep(quiet, { graceMs: 1_000 }).run();
+    expect(quiet.calls).toEqual(["close"]);
+  });
+
+  it("forces what is left after the grace window, and moves on when that hangs too", async () => {
+    // Bun 1.4.2: closeAllConnections() leaves a running request open, so close() still waits.
+    const busy = server(() => {});
+    const step = nodeServerStep(busy, { graceMs: 20 });
+    expect(step.name).toBe("http server");
+    await step.run();
+    expect(busy.calls).toEqual(["close", "closeAllConnections"]);
+  });
+
+  it("fails the step when close() fails", async () => {
+    const broken = server((done) => done(new Error("not running")));
+    await expect(nodeServerStep(broken, { graceMs: 20 }).run()).rejects.toThrow("not running");
+  });
+});
+
+// A real server on each runtime, because the two answer closeAllConnections() differently.
+const HTTP_FIXTURE = join(mkdtempSync(join(tmpdir(), "serverkit-http-")), "http.mjs");
+writeFileSync(
+  HTTP_FIXTURE,
+  `import http from "node:http";
+import { nodeServerStep } from ${JSON.stringify(fileURLToPath(new URL("./shutdown.ts", import.meta.url)))};
+const mode = process.argv[2];
+const server = http.createServer((req, res) =>
+  req.url === "/slow" ? setTimeout(() => res.end("late"), 3_000) : res.end("ok"),
+);
+server.keepAliveTimeout = 60_000;
+await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+const agent = new http.Agent({ keepAlive: true });
+const request = (path) =>
+  new Promise((resolve) =>
+    http
+      .get({ port: server.address().port, path, agent }, (res) => res.resume().on("end", resolve))
+      .on("error", resolve),
+  );
+if (mode === "idle") await request("/");
+else {
+  void request("/slow");
+  await new Promise((resolve) => setTimeout(resolve, 200));
+}
+const started = Date.now();
+await nodeServerStep(server, { graceMs: mode === "idle" ? 2_000 : 100 }).run();
+console.log(JSON.stringify({ ms: Date.now() - started }));
+process.exit(0);
+`,
+);
+
+function stepMs(runtime: string, mode: "idle" | "busy"): Promise<number> {
+  return new Promise((resolve, reject) => {
+    const child = spawn(runtime, [HTTP_FIXTURE, mode], { stdio: ["ignore", "pipe", "inherit"] });
+    let out = "";
+    child.stdout.on("data", (chunk: Buffer) => (out += chunk.toString()));
+    child.on("error", reject);
+    child.on("exit", () => resolve((JSON.parse(out) as { ms: number }).ms));
+  });
+}
+
+describe.each([
+  ["node", process.execPath],
+  ["bun", "bun"],
+])("nodeServerStep on a real server, on %s", (_name, runtime) => {
+  it("does not wait for an idle keep-alive connection", async () => {
+    expect(await stepMs(runtime, "idle")).toBeLessThan(500);
+  });
+
+  it("moves on while a request is still running", async () => {
+    // The handler takes 3 s; the step gives it 100 ms, then 100 ms more after forcing.
+    expect(await stepMs(runtime, "busy")).toBeLessThan(1_000);
   });
 });
 

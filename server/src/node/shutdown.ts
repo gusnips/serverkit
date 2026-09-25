@@ -16,6 +16,7 @@
  * - **One drain per process.** Ten APIs ran the whole sequence again on a second signal, and
  *   pg-pool's `end()` rejects when it is called a second time.
  */
+import type { Server } from "node:http";
 import type { Logger } from "../logger/index.ts";
 
 export interface ShutdownStep {
@@ -129,6 +130,38 @@ export function bunServerStep(
       });
       if (!stopped) await settlesWithin(graceMs, server.stop(true));
       if (failed) throw failure;
+    },
+  };
+}
+
+/**
+ * The step that stops a `node:http` server, such as the one Express's `app.listen()` returns. The
+ * same shape as {@link bunServerStep}: stop taking connections, give the requests in flight
+ * `graceMs`, then close what is left and wait `graceMs` more at most.
+ *
+ * An idle keep-alive connection does not hold it up: `close()` drops those itself, on Node 19 and
+ * later and on Bun 1.4.2. A request still running does, and there the runtimes part. Node's
+ * `closeAllConnections()` cuts it at once; Bun 1.4.2's leaves it open until its handler finishes
+ * (measured: the server closed 8 seconds later, when the handler answered). So on Bun the second
+ * window runs out, the steps after it run anyway, and the request ends with the process.
+ */
+export function nodeServerStep(
+  server: Pick<Server, "listening" | "close" | "closeAllConnections">,
+  options: { graceMs: number; name?: string },
+): ShutdownStep {
+  const { graceMs, name = "http server" } = options;
+  return {
+    name,
+    async run() {
+      if (!server.listening) return;
+      const closed = new Promise<void>((resolve, reject) =>
+        server.close((error) => (error ? reject(error) : resolve())),
+      );
+      // A close that fails after both windows would otherwise surface as an unhandled rejection.
+      closed.catch(() => {});
+      if (await settlesWithin(graceMs, closed)) return;
+      server.closeAllConnections();
+      await settlesWithin(graceMs, closed);
     },
   };
 }

@@ -721,8 +721,12 @@ Unhandled error event:", ...)` and returns — it never emits, so Node's throw i
     caught. Bun's `stop()` never resolves while an SSE client is attached, which is why
     `bunServerStep` bounds it; Bun 1.3.8's `stop(true)` does not close that connection either
     (curl still connected 20 seconds later, measured; 1.4.2 closes it at once), so the forced
-    stop is bounded too and the steps after it still run. `rejections` is required, because the
-    fleet uses both answers on purpose, and a rejection listener is installed for both: on Bun a
+    stop is bounded too and the steps after it still run. `nodeServerStep` is bounded twice for
+    the same reason, one runtime over: Bun 1.4.2's `node:http` `closeAllConnections()` leaves a
+    running request open until its handler answers, where Node cuts it at once. The test runs a
+    real server on both, because a stub cannot say which runtime keeps the socket.
+    `rejections` is required, because the fleet uses both answers on purpose, and a rejection
+    listener is installed for both: on Bun a
     rejection with only an `uncaughtException` listener exits 1 at once, skipping the drain,
     where Node hands it to that listener (measured on 1.3.8 and 1.4.2). An uncaught exception
     drains and exits 1 rather than exiting at once, because the backstop already bounds a drain
