@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, expectTypeOf, it } from "vitest";
 import { z } from "zod";
 import { type ValidationIssue, validationIssues } from "./index.ts";
 import { AppError, createAppError } from "./errors.ts";
@@ -231,6 +231,24 @@ describe("an AppError under 500 is answered as itself", () => {
     // Not a time at all: no header, and the body says what JSON would have written anyway.
     expect(wait(Number.NaN).headers).not.toHaveProperty("Retry-After");
     expect(wait(Number.POSITIVE_INFINITY).body.error.details).toEqual({ retryAfterSecs: null });
+  });
+});
+
+describe("the answer keeps the key union it was bound with", () => {
+  type Key = "errors.notFound" | "errors.internal";
+  const keyed = createErrorResponse<Code, Key>({
+    internal: { code: "INTERNAL_ERROR", message: "Failed", messageKey: "errors.internal" },
+    validation: { code: "VALIDATION_ERROR", message: "Unreadable" },
+  });
+  const keyedError = createAppError<typeof ERROR_STATUS, Key>(ERROR_STATUS);
+
+  it("so the body fits a slot typed with it", () => {
+    // A stream frame or a job's stored failure is typed with the product's keys. Typed `string`,
+    // the body needed a cast at every one of those sites.
+    const body = keyed(keyedError("NOT_FOUND", "Gone", { messageKey: "errors.notFound" })).body;
+    expectTypeOf(body.error.messageKey).toEqualTypeOf<Key | undefined>();
+    expect(body.error.messageKey).toBe("errors.notFound");
+    expect(keyed(new Error("boom")).body.error.messageKey).toBe("errors.internal");
   });
 });
 

@@ -205,6 +205,16 @@ package's dependency. Measured against zod 3.25, 4.4 and 4.5. A tool or queue co
 `validationIssues(error)` from the root package to apply the same allow-list without building an
 HTTP answer.
 
+**Recognized by shape also means ANY failed parse reads as the caller's mistake, including a
+parse of your own data.** A response checked against its schema, or a database row parsed on the
+way out, throws the same error as a bad request body. Let it escape and the caller gets a 400
+naming your response's own fields, for a bug that is yours. Check your own data with
+`safeParse`, and raise a failure as your internal 500, with the parse error as its `cause`. One
+adopter had it on every operation it served.
+
+The answer's `messageKey` is typed as the `MessageKey` you bound, so `errorResponse(err).body.error`
+fits a slot of your own, like a stream's error frame or a failed job's record, with no cast.
+
 **A 5xx keeps its message unless its code is masked.** By default only `INTERNAL_ERROR` is,
 because that is the code you raise when something unexpected broke, so its message may carry
 internals. The others were written for the client, and flattening a `GATEWAY_ERROR` into a

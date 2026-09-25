@@ -287,6 +287,15 @@ host outside the URL.
     imports — the API, a tool wrapper, a worker's health port. The reading found the alternative:
     four places in one fleet deciding the mask separately, and the one furthest from the API getting
     it wrong.
+
+    **It reads a failed parse by shape, so it cannot tell whose data failed.** One adopter checked
+    every operation's answer against its response schema with `.parse`. Behind its own mapper that
+    was a 500. Behind this one it was the caller's 400, naming the response's own fields back to
+    them. That is the price of recognizing validation without importing the validator, and the
+    package cannot pay it: a thrown issue list carries no owner. So the rule goes to the adopter.
+    Your own data gets `safeParse`, and a failure is raised as your internal 500, with the parse
+    as its `cause`.
+
 26. **A log line's error slot allow-lists what a non-`Error` may contribute.** A deny-list has to
     know `payload`, `header`, `raw`, `command`, `where` and the next vendor's word for it, and it
     learns each one from an incident. Measured: a webhook error carries the unverified request body,

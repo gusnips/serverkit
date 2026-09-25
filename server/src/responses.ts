@@ -54,9 +54,14 @@ export function noContent() {
   return { status: 204 as const, body: null };
 }
 
-export interface ErrorAnswer<Code extends string = string> {
+export interface ErrorAnswer<Code extends string = string, Key extends string = string> {
   status: number;
-  body: ApiError<Code>;
+  /**
+   * `messageKey` is your key union here, not `string`, so the body fits a typed slot of your own
+   * — a stream frame, a failed job's record — without a cast. The wire type stays `string`,
+   * because a client cannot check a key it was sent; the server that raised it can.
+   */
+  body: ApiError<Code> & { error: { messageKey?: Key } };
   /** `Retry-After` when the refusal states a wait; `WWW-Authenticate` on a 401. */
   headers: Record<string, string>;
   /**
@@ -154,7 +159,9 @@ function detailsWithRetry(err: AppError): unknown {
  * choice — see the note on the class. It also keeps the envelope in one file with the mask,
  * instead of in two.
  */
-function appErrorBody<Code extends string>(err: AppError<Code>): ApiError<Code> {
+function appErrorBody<Code extends string, Key extends string>(
+  err: AppError<Code, Key>,
+): ErrorAnswer<Code, Key>["body"] {
   const details = detailsWithRetry(err);
   return {
     error: {
@@ -170,7 +177,7 @@ function appErrorBody<Code extends string>(err: AppError<Code>): ApiError<Code> 
 function envelope<Code extends string, Key extends string>(
   canned: CannedError<Code, Key>,
   details?: unknown,
-): ApiError<Code> {
+): ErrorAnswer<Code, Key>["body"] {
   return {
     error: {
       code: canned.code,
@@ -256,9 +263,11 @@ export function validationIssues(error: {
 /**
  * `AppError` is generic over the product's own code union, and no runtime check can verify
  * membership. The predicate asserts what `createAppError` guarantees: every `AppError` in this
- * app was built from the map whose keys are `Code`.
+ * app was built from the map whose keys are `Code`, with options whose `messageKey` is a `Key`.
  */
-function isAppError<Code extends string>(err: unknown): err is AppError<Code> {
+function isAppError<Code extends string, Key extends string>(
+  err: unknown,
+): err is AppError<Code, Key> {
   return err instanceof AppError;
 }
 
@@ -284,7 +293,7 @@ export function createErrorResponse<Code extends string = string, Key extends st
 ) {
   const maskedCodes: readonly string[] = opts.maskedCodes ?? DEFAULT_MASKED;
 
-  return function errorResponse(err: unknown): ErrorAnswer<Code> {
+  return function errorResponse(err: unknown): ErrorAnswer<Code, Key> {
     const issues = zodIssues(err);
     if (issues !== null) {
       return {
@@ -295,7 +304,7 @@ export function createErrorResponse<Code extends string = string, Key extends st
       };
     }
 
-    if (isAppError<Code>(err)) {
+    if (isAppError<Code, Key>(err)) {
       const headers: Record<string, string> = {};
       // The standard header, not just our envelope: every HTTP client, proxy and SDK already
       // knows how to wait on `Retry-After`, and none of them knows `details.retryAfterSecs`.
