@@ -170,8 +170,9 @@ export interface ProcessHandlerOptions {
  * A second stop signal exits 1 at once, so a person pressing Ctrl+C twice does not wait out a
  * worker's ten-minute budget. One that arrives within a second of the first is the same stop,
  * delivered twice, and is ignored: pm2 signals every process in the tree, and a wrapper such as
- * `bun run` forwards SIGTERM to its child too, so under `bun run start` the app got SIGTERM twice
- * in the same millisecond (measured on Bun 1.4.2, Linux). Read as a person, that skipped the drain.
+ * `bun run` forwards SIGINT and SIGTERM to its child too, so under `bun run start` the app got the
+ * stop twice in the same millisecond (measured on Bun 1.4.2, Linux). Read as a person, that skipped
+ * the drain. The two often merge first, since signals do not queue, which is what hid it.
  */
 export function installProcessHandlers(shutdown: Shutdown, options: ProcessHandlerOptions): void {
   const { logger, rejections, signals = ["SIGTERM", "SIGINT"] } = options;

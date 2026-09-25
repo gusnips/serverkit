@@ -730,10 +730,16 @@ Unhandled error event:", ...)` and returns — it never emits, so Node's throw i
     the same stop, ignored. This said "a process manager sends one and then SIGKILL, so the second
     comes from a person", and that was false for the fleet's own wrapper: pm2 signals every process
     in the tree (`treekill`), `bun run` forwards SIGTERM to its child too, and the app got SIGTERM
-    twice in the same millisecond (Bun 1.4.2, Linux), so the drain was skipped. pm2's default
-    SIGINT is not forwarded and arrived once, which is why nothing had shown it. Standard signals do
-    not queue, so on Node the pair can merge into one before the handler runs; the test that pins
-    this fails on Bun without the window. The handlers go in before boot, through a function
+    twice in the same millisecond (Bun 1.4.2, Linux), so the drain was skipped. **The sentence that
+    replaced it was false too**: "pm2's default SIGINT is not forwarded and arrives once". The probe
+    behind it started the wrapper as a background job of a non-interactive shell, which POSIX starts
+    with SIGINT ignored, so the wrapper never saw the signal it was said not to forward. With job
+    control on, `bun run` forwards SIGINT exactly as it forwards SIGTERM. Whether the app then sees
+    one signal or two is a race: standard signals do not queue, so the pair usually merges before
+    the handler runs, and 2 of 28 Linux probes delivered two. That is why nothing had shown it, and
+    why a stop skipped the drain now and then rather than every time. A probe for a signal has to
+    watch that signal arrive in a control first. The test that pins the window fails on Bun without
+    it. The handlers go in before boot, through a function
     that forwards to whichever drain exists: three adopters wrote that by hand in the first wave,
     because the steps need a server that does not exist yet and the donors' crash pair sat on the
     first line, where a boot crash still reaches the log. The README's example now starts there.

@@ -1429,7 +1429,7 @@ shutdown = createShutdown(
 - **`installProcessHandlers`** drains on SIGTERM, on SIGINT (what pm2 sends) and on an uncaught
   exception, and logs every crash through your logger. A second signal exits 1 at once, unless it
   comes within a second of the first: pm2 signals every process in the tree, and `bun run` forwards
-  SIGTERM to the app as well, so one stop can arrive twice.
+  SIGINT and SIGTERM to the app as well, so one stop can arrive twice.
 - **`rejections` is required.** `"survive"` logs a rejected promise nobody handled and keeps
   going, for an API whose requests share nothing. `"exit"` logs it and drains, for a worker, where
   a job that stopped halfway may have left bad state.

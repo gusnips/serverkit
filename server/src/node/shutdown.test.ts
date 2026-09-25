@@ -216,7 +216,7 @@ describe.each([
     expect(messages).not.toContain("shutdown complete");
   });
 
-  // pm2 signals the whole tree and `bun run` forwards SIGTERM, so the app gets it twice at once.
+  // pm2 signals the whole tree and `bun run` forwards it, so the app can get it twice at once.
   it("drains once when the same stop arrives twice at once", async () => {
     const { code, messages } = await run(runtime, "slow", ["SIGTERM", "SIGTERM"]);
     expect(code).toBe(0);
