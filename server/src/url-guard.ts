@@ -283,7 +283,10 @@ function isPublicIpv6(groups: readonly number[]): boolean {
   const [first = 0, second = 0] = groups;
   if ((first & 0xe000) !== 0x2000) return false;
   if (first === 0x2002) return false; // 6to4: embeds an IPv4 address
-  if (first === 0x2001 && second === 0x0000) return false; // Teredo: embeds one too
+  // IETF protocol assignments, 2001::/23, refused whole like their IPv4 twin 192.0.0.0/24: Teredo
+  // (which embeds an IPv4 address too), benchmarking (the twin of 198.18.0.0/15) and ORCHID. The
+  // few anycast services in it answer protocols, never a webhook or a page.
+  if (first === 0x2001 && second < 0x0200) return false;
   if (first === 0x2001 && second === 0x0db8) return false; // documentation
   if (first === 0x3fff && second < 0x1000) return false; // documentation, 3fff::/20
   return true;

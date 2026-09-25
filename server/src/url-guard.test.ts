@@ -42,6 +42,9 @@ describe("isPublicAddress", () => {
     "64:ff9b::7f00:1", // NAT64
     "2002:7f00:1::1", // 6to4
     "2001::1", // Teredo
+    "2001:2::1", // benchmarking, the twin of 198.18.0.0/15, which one copy knew and the kit did not
+    "2001:10::1", // ORCHID
+    "2001:1ff:ffff::1", // the last of 2001::/23
     "2001:db8::1",
     "3fff::1",
     "fc00::1",
@@ -89,6 +92,7 @@ describe("isPublicAddress", () => {
     "2a00:1450:4001:80b::200e",
     "[2606:4700::1111]", // as a URL's hostname carries it
     "2001:4860:4860::8888",
+    "2001:200::1", // the first address past 2001::/23
     "3fff:1000::1",
     "2001:db9::1",
     "2600::8.8.8.8", // a dotted tail on a public prefix
