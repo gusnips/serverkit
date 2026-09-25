@@ -110,6 +110,8 @@ export function createIdempotency(pool: Pick<Pool, "query">, options: Idempotenc
      * replay hands back a stored answer.
      *
      * A throw from `work` lets the claim go and is rethrown, so a retry with the same key runs.
+     * When a throw can mean the work already ran, catch it inside `work` and return it instead:
+     * the stored answer then replays that failure rather than running the work twice.
      */
     async run<T>(
       scope: IdempotencyScope,

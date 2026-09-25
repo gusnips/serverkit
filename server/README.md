@@ -562,7 +562,25 @@ return created(c, outcome.answer);
   409 a client is meant to retry.
 - **Check who may call the operation before `run`.** A replay hands back a stored answer, and
   it must never reach a caller who could not get it now.
-- **A throw lets the key go**, so a retry with the same key runs again.
+- **A throw lets the key go**, so a retry with the same key runs again. That is right when the
+  throw means nothing happened. When it can mean the work already ran, as with a timeout after a
+  provider took the message, catch it inside the work and return it as the answer. A retry then
+  gets the same failure back instead of sending a second time:
+
+  ```ts
+  async () => {
+    try {
+      return { messageId: await sendMessage(input) };
+    } catch (error) {
+      // The provider had the message when this timed out, so it may have arrived.
+      if (isTimeoutAfterHandoff(error)) return { timedOut: true };
+      throw error;
+    }
+  };
+  ```
+
+  Turn `{ timedOut: true }` into your error on the first answer and on every replay.
+
 - **A failed save still answers.** The work happened, so `onError` gets the failure and the
   client gets its answer. Its retries see "running" until `abandonedSecs` passes, then run again.
   That is the one path that can still run twice, which is why `onError` is required.
