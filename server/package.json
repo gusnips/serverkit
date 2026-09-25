@@ -1,6 +1,6 @@
 {
   "name": "@gusnips/server",
-  "version": "0.8.9",
+  "version": "0.8.10",
   "description": "The layer under a TypeScript backend: one error shape, one response envelope, one retry rule, one logger.",
   "type": "module",
   "license": "MIT",
