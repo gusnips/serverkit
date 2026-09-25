@@ -42,7 +42,10 @@ export type Shutdown = (reason: string, exitCode?: number) => Promise<void>;
 /**
  * Runs `steps` in order, once, then exits:
  *
- *     const shutdown = createShutdown(
+ *     let shutdown: Shutdown = createShutdown([], { hardExitMs: 25_000, logger });
+ *     installProcessHandlers((reason, code) => shutdown(reason, code), { logger, rejections: "survive" });
+ *     // …boot: the env, the pool, Redis, the server…
+ *     shutdown = createShutdown(
  *       [
  *         bunServerStep(server, { graceMs: 5_000 }),
  *         { name: "redis", run: () => redis.quit() },
@@ -50,7 +53,6 @@ export type Shutdown = (reason: string, exitCode?: number) => Promise<void>;
  *       ],
  *       { hardExitMs: 25_000, logger },
  *     );
- *     installProcessHandlers(shutdown, { logger, rejections: "survive" });
  */
 export function createShutdown(steps: readonly ShutdownStep[], options: ShutdownOptions): Shutdown {
   const { hardExitMs, logger, exit = (code: number) => process.exit(code) } = options;
@@ -106,7 +108,9 @@ export function createShutdown(steps: readonly ShutdownStep[], options: Shutdown
  * its own: an API with one stream open waited out its whole backstop, and never closed Redis or
  * Postgres. Bun 1.3.8's `stop(true)` leaves a streaming connection open too (measured: still
  * connected 20 seconds later, where Bun 1.4.2 closes it at once). So the forced stop gets the same
- * window, the steps after it run either way, and what is left closes with the process.
+ * window, the steps after it run either way, and what is left closes with the process. A `stop()`
+ * that rejects still gets the forced stop, then fails the step with its own error: the drain it
+ * replaced force-closed either way, and a rejection says nothing about what is still connected.
  */
 export function bunServerStep(
   server: { stop(closeActiveConnections?: boolean): unknown },
@@ -116,8 +120,15 @@ export function bunServerStep(
   return {
     name,
     async run() {
-      if (!(await settlesWithin(graceMs, server.stop())))
-        await settlesWithin(graceMs, server.stop(true));
+      let failed = false;
+      let failure: unknown;
+      const stopped = await settlesWithin(graceMs, server.stop()).catch((error: unknown) => {
+        failed = true;
+        failure = error;
+        return false;
+      });
+      if (!stopped) await settlesWithin(graceMs, server.stop(true));
+      if (failed) throw failure;
     },
   };
 }

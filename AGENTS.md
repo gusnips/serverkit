@@ -733,7 +733,11 @@ Unhandled error event:", ...)` and returns — it never emits, so Node's throw i
     twice in the same millisecond (Bun 1.4.2, Linux), so the drain was skipped. pm2's default
     SIGINT is not forwarded and arrived once, which is why nothing had shown it. Standard signals do
     not queue, so on Node the pair can merge into one before the handler runs; the test that pins
-    this fails on Bun without the window. The budget check stays in the adopter, because
+    this fails on Bun without the window. The handlers go in before boot, through a function
+    that forwards to whichever drain exists: three adopters wrote that by hand in the first wave,
+    because the steps need a server that does not exist yet and the donors' crash pair sat on the
+    first line, where a boot crash still reaches the log. The README's example now starts there.
+    The budget check stays in the adopter, because
     only the adopter can read its process manager's config; the README gives the order.
 43. **A job is final when BullMQ says so, and a finished job is deleted unless you say otherwise.**
     Six `bullmq.ts` copies, four dead-letter files and five schedule syncs, 1,170 lines, and each

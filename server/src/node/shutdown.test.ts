@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { createLogger } from "../logger/index.ts";
-import { bunServerStep, createShutdown, type ShutdownStep } from "./shutdown.ts";
+import { bunServerStep, createShutdown, type Shutdown, type ShutdownStep } from "./shutdown.ts";
 
 function harness(steps: ShutdownStep[], hardExitMs = 5_000) {
   const lines: string[] = [];
@@ -120,11 +120,12 @@ describe("bunServerStep", () => {
     expect(streaming.calls).toEqual(["stop()", "stop(true)"]);
   });
 
-  it("fails the step when stop() throws", async () => {
+  it("still forces the server when stop() rejects, then fails the step", async () => {
     const broken = server({ stop: () => Promise.reject(new Error("not listening")) });
-    await expect(bunServerStep(broken, { graceMs: 1_000, name: "api" }).run()).rejects.toThrow(
+    await expect(bunServerStep(broken, { graceMs: 20, name: "api" }).run()).rejects.toThrow(
       "not listening",
     );
+    expect(broken.calls).toEqual(["stop()", "stop(true)"]);
   });
 });
 
@@ -252,20 +253,35 @@ describe("README — stopping for a deploy", () => {
     const redis = { quit: async () => void closed.push("redis") };
     const pool = { end: async () => void closed.push("postgres") };
     const exits: number[] = [];
-    const shutdown = createShutdown(
+    const options = {
+      hardExitMs: 25_000,
+      logger: createLogger({ level: "silent" }),
+      exit: (code: number) => void exits.push(code),
+    };
+    let shutdown: Shutdown = createShutdown([], options);
+    const handed: Shutdown = (reason, code) => shutdown(reason, code);
+    shutdown = createShutdown(
       [
         bunServerStep(server, { graceMs: 5_000 }),
         { name: "redis", run: () => redis.quit() },
         { name: "postgres", run: () => pool.end() },
       ],
-      {
-        hardExitMs: 25_000,
-        logger: createLogger({ level: "silent" }),
-        exit: (code) => exits.push(code),
-      },
+      options,
     );
-    await shutdown("SIGTERM");
+    await handed("SIGTERM");
     expect(closed).toEqual(["server", "redis", "postgres"]);
     expect(exits).toEqual([0]);
+  });
+
+  it("exits 1 through the empty drain when it crashes while booting", async () => {
+    const exits: number[] = [];
+    const shutdown: Shutdown = createShutdown([], {
+      hardExitMs: 25_000,
+      logger: createLogger({ level: "silent" }),
+      exit: (code) => exits.push(code),
+    });
+    const handed: Shutdown = (reason, code) => shutdown(reason, code);
+    await handed("uncaught exception", 1);
+    expect(exits).toEqual([1]);
   });
 });

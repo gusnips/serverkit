@@ -1389,9 +1389,20 @@ A process manager stops your process with a signal, and kills it when its timeou
 between, finish the work in flight and close what it used, in order:
 
 ```ts
-import { bunServerStep, createShutdown, installProcessHandlers } from "@gusnips/server/node";
+import {
+  bunServerStep,
+  createShutdown,
+  installProcessHandlers,
+  type Shutdown,
+} from "@gusnips/server/node";
 
-const shutdown = createShutdown(
+// First, before anything that can throw.
+let shutdown: Shutdown = createShutdown([], { hardExitMs: 25_000, logger });
+installProcessHandlers((reason, code) => shutdown(reason, code), { logger, rejections: "survive" });
+
+// …check the env, open the pool and Redis, start the server…
+
+shutdown = createShutdown(
   [
     bunServerStep(server, { graceMs: 5_000 }),
     { name: "redis", run: () => redis.quit() },
@@ -1399,8 +1410,13 @@ const shutdown = createShutdown(
   ],
   { hardExitMs: 25_000, logger },
 );
-installProcessHandlers(shutdown, { logger, rejections: "survive" });
 ```
+
+- **Install the handlers first, and hand them the drain once it exists.** A crash while booting,
+  such as a port already taken or a bad env, is the one your log most needs, and the steps need a
+  server that does not exist yet. Until the real drain replaces it, the empty one logs the crash
+  and exits 1. On Bun 1.4.2 a throw at the top level and a rejected top-level `await` both reach
+  the handler.
 
 - **The steps run once, in the order you list them.** Stop taking work first. Close the database
   last, because a request that is still finishing may still query it.
@@ -1422,6 +1438,8 @@ Each of these numbers must be larger than the one before it:
 
 1. The longest request you let finish, or in a worker the longest job.
 2. `hardExitMs`. On Bun 1.3.8, `bunServerStep` can take `graceMs` twice while a stream is open.
+   A step that waits on its own counts too: pg-boss's `stop()` waits 30 seconds unless you pass
+   `timeout`, which outlasted one API's 25-second `hardExitMs`.
 3. Your process manager's kill timeout. pm2's `kill_timeout` is 1.6 seconds unless you set it.
 4. When pm2 runs under systemd, the unit's `TimeoutStopSec`.
 
