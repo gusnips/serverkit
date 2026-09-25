@@ -279,7 +279,10 @@ host outside the URL.
     somebody else's job ends, and a cap on live objects clears by archiving one. A required `number`
     would have forced both to invent one. **An omission is invisible in a diff; a `null` is a claim
     somebody has to read** — and it is the claim that lets a client delete its hand-maintained list
-    of durable codes.
+    of durable codes. **The wait goes out in whole seconds, never below zero**, because
+    `Retry-After` is `1*DIGIT`: `errorResponse` rounds a fraction up and reads a past reset as now.
+    The adopter that knew this threw a `RangeError` from its error constructor instead, which turns
+    the 429 into a 500 at the moment the limiter is busiest.
 25. **The mask is bound once, at the edge.** `createErrorResponse` returns the function every door
     imports — the API, a tool wrapper, a worker's health port. The reading found the alternative:
     four places in one fleet deciding the mask separately, and the one furthest from the API getting

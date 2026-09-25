@@ -141,7 +141,8 @@ invisible in a diff; a `null` is a claim somebody has to read.
 `errorResponse` renders a number as the standard `Retry-After` header **and** folds it into
 `details`, so an HTTP client, a proxy and your own SDK all learn the same wait from one value. A
 `null` is folded in without a header, because a `Retry-After` that names no time is worse than
-none.
+none. Both places get whole seconds, never below zero: `1.2` goes out as `2`, and a window that
+already reset (`-3`) as `0`.
 
 Two edges worth knowing:
 

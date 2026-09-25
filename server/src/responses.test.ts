@@ -218,6 +218,20 @@ describe("an AppError under 500 is answered as itself", () => {
     expect(answer.headers["Retry-After"]).toBe("45");
     expect(answer.body.error.details).toEqual({ retryAfterSecs: 45 });
   });
+
+  it("states a wait in whole seconds, never below zero", () => {
+    // `Retry-After` is 1*DIGIT. A wait from a window that already reset is negative, and one
+    // divided out of milliseconds is a fraction: round up, and a past reset is now.
+    const wait = (retryAfterSecs: number) =>
+      errorResponse(appError("RATE_LIMIT_EXCEEDED", "Slow down", { retryAfterSecs }));
+    expect(wait(1.2).headers["Retry-After"]).toBe("2");
+    expect(wait(1.2).body.error.details).toEqual({ retryAfterSecs: 2 });
+    expect(wait(-3).headers["Retry-After"]).toBe("0");
+    expect(wait(-3).body.error.details).toEqual({ retryAfterSecs: 0 });
+    // Not a time at all: no header, and the body says what JSON would have written anyway.
+    expect(wait(Number.NaN).headers).not.toHaveProperty("Retry-After");
+    expect(wait(Number.POSITIVE_INFINITY).body.error.details).toEqual({ retryAfterSecs: null });
+  });
 });
 
 describe("the 5xx mask", () => {

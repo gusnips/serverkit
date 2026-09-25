@@ -113,6 +113,21 @@ export interface ErrorResponseOptions<Code extends string, Key extends string> {
 }
 
 /**
+ * A wait the way HTTP can say it: whole seconds, never below zero.
+ *
+ * `Retry-After` is `1*DIGIT`, so `1.5` is a header a client may ignore or misread, and a wait
+ * worked out from a window that has already reset comes out negative. Rounding up is always safe
+ * (a caller that waits a little longer still gets in) and a reset in the past means now. One
+ * adopter refused both in its error constructor instead, which turns the refusal into a 500 at
+ * the moment the limiter is busiest. A wait that is not a finite number states no time at all,
+ * which is what `null` says, and is what `JSON.stringify` would have written for it anyway.
+ */
+function wholeSeconds(secs: number | null | undefined): number | null | undefined {
+  if (typeof secs !== "number") return secs;
+  return Number.isFinite(secs) ? Math.max(0, Math.ceil(secs)) : null;
+}
+
+/**
  * `retryAfterSecs` also rides inside `details`, because that is where clients already look —
  * an explicit `null` included, since "waiting cannot fix this" is an answer a client needs and
  * the only alternative is the hand-written code list this replaces.
@@ -123,12 +138,13 @@ export interface ErrorResponseOptions<Code extends string, Key extends string> {
  * the header still tells that caller when to come back.
  */
 function detailsWithRetry(err: AppError): unknown {
-  if (err.retryAfterSecs === undefined) return err.details;
+  const retryAfterSecs = wholeSeconds(err.retryAfterSecs);
+  if (retryAfterSecs === undefined) return err.details;
   const carries =
     err.details === undefined ||
     (typeof err.details === "object" && err.details !== null && !Array.isArray(err.details));
   if (!carries) return err.details;
-  return { ...err.details, retryAfterSecs: err.retryAfterSecs };
+  return { ...err.details, retryAfterSecs };
 }
 
 /**
@@ -285,9 +301,8 @@ export function createErrorResponse<Code extends string = string, Key extends st
       // knows how to wait on `Retry-After`, and none of them knows `details.retryAfterSecs`.
       // A number only — a refusal that waiting cannot fix says so in the body, because
       // `Retry-After: null` is a header that states a wait and names no time.
-      if (typeof err.retryAfterSecs === "number") {
-        headers["Retry-After"] = String(err.retryAfterSecs);
-      }
+      const wait = wholeSeconds(err.retryAfterSecs);
+      if (typeof wait === "number") headers["Retry-After"] = String(wait);
       // RFC 6750 §3: a 401 names the scheme it wants. Without it a 401 is a closed door with no
       // handle — which is what an agent, with no human to ask, is left holding.
       if (err.statusCode === 401) headers["WWW-Authenticate"] = "Bearer";
