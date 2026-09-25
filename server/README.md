@@ -1443,6 +1443,12 @@ drainWith(
   empty one logs the crash and exits 1. On Node 24 and Bun 1.4.2, a throw while a module loads, a
   throw at the top level and a rejected top-level `await` all reach the handler.
 
+  One throw still comes first, on purpose: `createLogger` refuses an unknown `LOG_LEVEL`, and the
+  handlers need the logger. It prints `Unknown log level "verbose". Use one of: …`, which names the
+  fix, and nothing is running yet that a drain could finish. The process exits before it answers
+  anything, so a deploy that checks health fails, and the typo is found then. Falling back to `info`
+  would hide it until the day someone needs the debug lines.
+
 - **The steps run once, in the order you list them.** Stop taking work first. Close the database
   last, because a request that is still finishing may still query it.
 - **A failed step does not stop the rest**, and the process then exits 1, so your process manager
