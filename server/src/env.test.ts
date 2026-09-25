@@ -157,6 +157,18 @@ describe("envProblems", () => {
     expect(envProblems({ SECRET: "" }, { secrets: { SECRET: 32 } })).toEqual([]);
   });
 
+  it("checks a secret that is set even when its group is off", () => {
+    // Three adopters asked for this to be skipped. The spec cannot see which code reads a key,
+    // and a webhook route mounted either way verifies with the placeholder that would slip by.
+    const spec = {
+      groups: { GITHUB_APP_ID: ["GITHUB_WEBHOOK_SECRET"] },
+      secrets: { GITHUB_WEBHOOK_SECRET: 32 },
+    };
+    expect(envProblems({ GITHUB_WEBHOOK_SECRET: "your-webhook-secret" }, spec)).toEqual([
+      "GITHUB_WEBHOOK_SECRET looks like a placeholder from .env.example. Put the real secret there.",
+    ]);
+  });
+
   it("adds your own rules to the same list", () => {
     const source = { STRIPE_SECRET_KEY: "sk_live_1" };
     expect(

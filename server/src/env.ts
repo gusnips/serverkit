@@ -29,6 +29,10 @@ export interface EnvSpec<Source extends object> {
    * Secrets, each with the fewest characters it may have. When one is set, it must be at least
    * that long and must not be a placeholder from `.env.example`. Use 32 for a secret you make with
    * `openssl rand -base64 32`, and a vendor's own length for one they give you.
+   *
+   * A secret that is set is checked even when the head of its group is not. The spec knows which
+   * keys go together, not which code reads them: a webhook route mounted either way verifies with
+   * its secret whether or not the rest of its integration is configured.
    */
   secrets?: Readonly<Record<string, number>>;
   /** Your own rules, returned as more lines for the same list. Keep values out of them. */

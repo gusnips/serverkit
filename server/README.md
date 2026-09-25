@@ -1376,6 +1376,10 @@ Copy apps/api/.env.example to apps/api/.env and fill it in.
   placeholder takes: `your-…`, `<…>`, `…-xxx`, `generate-…`, `change-me` and `dev-only`. A
   placeholder that boots signs and verifies like a real secret, and anyone who has read your
   `.env.example` can forge with it.
+- **A secret that is set is checked, even when its group is off.** Leave `SMTP_HOST` unset with a
+  placeholder still in `SMTP_PASS`, and the boot stops. That is on purpose: the spec knows which
+  keys go together, not which code reads them, and a webhook route mounted either way still
+  verifies with its secret. Delete the line of an integration you do not run.
 - **`check`** adds your own rules to the same list. Return a line per problem, with no value in it.
 - In a Worker, pass its `env`. `envProblems` returns the same list without throwing, for a test.
 
