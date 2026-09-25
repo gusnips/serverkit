@@ -215,6 +215,18 @@ export function wireDeadLetter(
 const STALLED_OUT = "job stalled more than allowable limit";
 
 /**
+ * For a `failed` listener: true when BullMQ failed `job` for good because its worker kept dying,
+ * not because the job threw. A row the job was driving then needs "the worker was lost" rather
+ * than "the job failed", and BullMQ never calls the processor again to write it.
+ *
+ * It matches BullMQ's reason exactly, as `retryStalledFailures` does, so a job whose own error
+ * mentions "stalled" is not one.
+ */
+export function isStalledOut(job: Job | undefined): job is Job & { finishedOn: number } {
+  return isFinalFailure(job) && job.failedReason === STALLED_OUT;
+}
+
+/**
  * Re-adds the failed jobs that failed because their worker died, and returns how many. Call it
  * when a worker starts, because a worker starting is what stranded them: two deploys inside one
  * long job use up its two stall retries, and BullMQ then fails it for good.
@@ -231,7 +243,7 @@ export async function retryStalledFailures(
     throw new TypeError(`limit is a whole number above 0, not ${limit}`);
   let retried = 0;
   for (const job of await queue.getFailed(0, limit - 1)) {
-    if (job.failedReason !== STALLED_OUT) continue;
+    if (!isStalledOut(job)) continue;
     await job.retry();
     retried++;
   }

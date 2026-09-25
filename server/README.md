@@ -718,6 +718,10 @@ await retryStalledFailures(reports);
   up its two retries. It only matches the reason BullMQ writes, so a job that failed with the word
   "stalled" in its own error stays failed. Never call it on a queue whose jobs must run at most
   once.
+- **`isStalledOut(job)`** is for a `failed` listener. It is true when BullMQ gave up on the job
+  because its worker kept dying, not because the job threw. BullMQ never runs your code again for
+  that job, so if the job was driving a row, set the row's status here. "We lost the worker" is a
+  different answer from "the job failed".
 - **`CAPPED_EXPONENTIAL`** retries after about 5, 10 and 20 seconds, and so on up to 120:
   `backoff: { type: CAPPED_EXPONENTIAL }`.
 - **`removeLeftoverJob`** is for jobs you add under an id you chose. BullMQ skips the add, with no

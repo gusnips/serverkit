@@ -11,6 +11,7 @@ import {
   createQueue,
   createWorker,
   isFinalFailure,
+  isStalledOut,
   removeLeftoverJob,
   retryStalledFailures,
   syncJobSchedulers,
@@ -298,8 +299,8 @@ describe.skipIf(!hasRedisServer)("against a real Redis", () => {
     });
   });
 
-  describe("retryStalledFailures", () => {
-    it("re-runs a job whose worker died, and leaves a job that failed on its own", async () => {
+  describe("isStalledOut and retryStalledFailures", () => {
+    it("tells a job whose worker died from one that failed on its own, and re-runs only the first", async () => {
       const at = on();
       const queue = track(createQueue("long", at));
       const settings = { lockDuration: 500, stalledInterval: 200, maxStalledCount: 0 };
@@ -311,7 +312,7 @@ describe.skipIf(!hasRedisServer)("against a real Redis", () => {
       await dying.close(true);
 
       const ran: string[] = [];
-      track(
+      const worker = track(
         createWorker(
           "long",
           async (job) => {
@@ -321,11 +322,16 @@ describe.skipIf(!hasRedisServer)("against a real Redis", () => {
           { ...at, ...settings },
         ),
       );
+      const seen: string[] = [];
+      worker.on("failed", (job) => void seen.push(`${job?.name} ${isStalledOut(job)}`));
       await queue.add("sync", {});
       await eventually(async () => (await queue.getFailedCount()) === 2, 10_000);
       expect((await queue.getJob(stranded.id ?? ""))?.failedReason).toBe(
         "job stalled more than allowable limit",
       );
+      // What a `failed` listener sees: only the job whose worker died was stalled out.
+      await eventually(async () => seen.length === 2);
+      expect(seen.sort()).toEqual(["export true", "sync false"]);
 
       expect(await retryStalledFailures(queue)).toBe(1);
       await eventually(async () => (await queue.getCompletedCount()) === 1);
