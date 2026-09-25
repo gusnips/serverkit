@@ -1219,7 +1219,9 @@ app.get("/openapi.json", (c) => reference(c.req.query("lang")));
 - **Every refusal points at one `ApiError` schema**, the `{ error }` envelope. A 409, a 429 and a
   503 also document `Retry-After`, because those are the ones this package's own code sends it on.
   Pass `errorCodes` with every code your API answers with, and the schema lists them, so a
-  generated client can switch on one.
+  generated client can switch on one. `errors` on the options is what every operation can
+  answer; `errors` on one operation adds what only it can, such as a 504 on a call that waits
+  on someone else.
 - **`meta` sits beside `data`** when you say what it holds: `meta: PageMetaSchema` names it on
   every success, as optional.
 - **Schemas are zod 4.4 or later, any other Standard JSON Schema, or plain JSON Schema.** A type

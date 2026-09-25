@@ -72,6 +72,11 @@ export interface OpenApiOperation {
   response?: SchemaSource;
   /** The success status. 200 by default. */
   status?: number;
+  /**
+   * Refusals only this operation answers, beside the shared `errors`: `{ 504: "…" }` on the
+   * calls that wait on someone else. A status in both takes this description.
+   */
+  errors?: Readonly<Record<number, string>>;
   /** An example of `data`, shown beside the success response. */
   example?: unknown;
   /** Needs no credential, so it names no security scheme. */
@@ -241,7 +246,7 @@ export function buildOpenApi(
         },
       },
     };
-    for (const [status, description] of Object.entries(options.errors ?? {})) {
+    for (const [status, description] of Object.entries({ ...options.errors, ...op.errors })) {
       responses[status] = {
         description,
         ...(MAY_STATE_A_WAIT.has(Number(status)) && { headers: { "Retry-After": RETRY_AFTER } }),

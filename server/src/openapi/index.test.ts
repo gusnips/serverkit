@@ -298,6 +298,21 @@ describe("the envelope", () => {
     expect(success(buildOpenApi([pair], options)).properties).not.toHaveProperty("meta");
   });
 
+  it("adds an operation's own refusals to the shared ones, and only on that operation", () => {
+    const send: OpenApiOperation = {
+      ...pair,
+      name: "send",
+      path: "/messages",
+      errors: { 429: "Slow down, this number is warming up.", 504: "It may still arrive." },
+    };
+    const doc = buildOpenApi([pair, send], options);
+    const own = op(doc, "/messages", "post").responses;
+    expect(Object.keys(own)).toEqual(["201", "400", "401", "402", "429", "504", "default"]);
+    expect(own["429"]?.description).toBe("Slow down, this number is warming up.");
+    expect(own["504"]?.description).toBe("It may still arrive.");
+    expect(op(doc, "/numbers/{id}/pair", "post").responses).not.toHaveProperty("504");
+  });
+
   it("lists the error codes, so a client can switch on one", () => {
     const codes = ["NOT_FOUND", "RATE_LIMIT_EXCEEDED"];
     const doc = buildOpenApi([pair], { ...options, errorCodes: codes });
