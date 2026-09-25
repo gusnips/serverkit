@@ -1464,6 +1464,30 @@ Check the order in a test that reads the numbers from your config files. One API
 `hardExitMs` under a 70-second kill timeout, raised for requests that run up to 60 seconds, so
 every deploy cut those requests off at 25.
 
+**End open streams first.** An SSE stream or a long poll never finishes on its own, so while one is
+open the server step waits out all of `graceMs`. When pm2 restarts one process at a time, nothing
+answers new requests during that wait. Make the first step end them:
+
+```ts
+const draining = new AbortController();
+
+// In each stream handler:
+draining.signal.addEventListener("abort", () => stream.close(), { once: true });
+
+shutdown = createShutdown(
+  [
+    { name: "streams", run: () => draining.abort() },
+    bunServerStep(server, { graceMs: 5_000 }),
+    // …
+  ],
+  { hardExitMs: 25_000, logger },
+);
+```
+
+The client reconnects to the new process, and a request that has to finish still gets `graceMs`.
+The steps run in order, so the first one runs the moment the drain starts; a job that should stop
+early can watch the same signal.
+
 ## What this package does not ship
 
 Each of these was measured, not assumed.
