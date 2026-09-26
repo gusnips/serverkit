@@ -751,7 +751,13 @@ await retryStalledFailures(reports);
 - **Finished jobs are deleted.** BullMQ keeps them forever unless told otherwise, and one backend's
   Redis grew to about 16 GB before anyone noticed. Completed jobs stay for a day, 200 at most.
   Failed ones stay for a week, 1,000 at most. The worker sets the same limits, so a job a script
-  adds through a plain `new Queue` is deleted too.
+  adds through a plain `new Queue` is deleted too. If something waits for a job with
+  `job.waitUntilFinished()`, don't set `removeOnComplete: true` on that queue: the job can be gone
+  before the wait reads it, and the wait fails with "Missing key".
+- **A worker starts taking jobs as soon as you build it.** If the same process also listens on a
+  port or sets up its shutdown, pass `autorun: false` and call `worker.run()` once both are ready.
+  Otherwise, during a deploy, a second process can take a job and then die on the port the first
+  one still holds. That job runs again later, or never, if its queue runs jobs at most once.
 - **A job whose worker dies runs again, twice at most, 15 to 90 seconds later.** The third time
   its worker dies, the job fails. The wait comes from how BullMQ finds such a job. A live worker
   checks every 30 seconds. Each check marks every running job, the worker running it clears the
@@ -765,6 +771,9 @@ await retryStalledFailures(reports);
   on that queue to log each record or tell a person. It asks BullMQ whether the job will run again,
   instead of counting attempts, so it also records a job that threw `UnrecoverableError` or
   stalled too often on its first attempt. Three of the five dead letters it replaces missed those.
+  Each record keeps a copy of the job's `data` for a week, so don't wire a worker whose jobs carry a
+  secret, such as a password or a login. Log its job id from its own `failed` listener instead;
+  `isFinalFailure(job)` tells you the job will not run again.
   In your shutdown, call `flush()` after the worker closes and before Redis does. While Redis is
   down, `worker.close()` never returns: see [Stopping for a deploy](#stopping-for-a-deploy).
 - **`retryStalledFailures` re-runs the jobs a deploy killed.** Two deploys during one long job use
