@@ -1,7 +1,8 @@
 # @gusnips/sdkgen
 
-The parts of a script that writes a TypeScript SDK for your API. You keep the script, because the
-methods it writes are yours. This package holds the parts that are easy to get wrong.
+The parts of a script that writes a TypeScript SDK for your API. You keep the script: it picks the
+names, the doc text and anything written by hand. This package writes the rest, including the
+parts that are easy to get wrong.
 
 ```bash
 bun add -d @gusnips/sdkgen prettier
@@ -39,6 +40,9 @@ fieldsOf(inputJsonSchema(z.object({ to: z.string().describe("Who gets it.") })))
 | `camelCase`, `pascalCase` | `send_message` gives `sendMessage` and `SendMessage`.                              |
 | `inputJsonSchema`         | Turns a zod schema into JSON Schema. JSON Schema passes through as it is.          |
 | `writeGenerated`          | Formats and writes the files, or lists the ones that are out of date.              |
+| `sdkMethods`              | Writes one SDK method per operation, and the params type each one takes.           |
+| `transportSource`         | Returns the code every method runs on: the request, the retries, the error.        |
+| `retrySource`             | Returns the rule for when a failed call is worth another try.                      |
 
 ## Copy your API's types
 
@@ -76,6 +80,135 @@ output drops the comments. It finds `export interface`, `export type`, `export c
   If a real type has a name that short, the SDK will not compile, so you find out.
 - A quote inside a regex literal, like `/"/`, is read as the start of a string.
 
+## Write the methods
+
+Give each operation an `sdk` field that says what its method is called and what it returns. An
+operation without one gets no method.
+
+```ts
+import { sdkMethods } from "@gusnips/sdkgen";
+
+const { members } = sdkMethods([
+  {
+    name: "health",
+    method: "get",
+    path: "/health",
+    summary: "Check the API is up.",
+    sdk: { method: "health", returns: "HealthDto" },
+  },
+]);
+```
+
+`members` is the method as text, ready to go inside a class:
+
+```ts
+    /**
+     * Check the API is up.
+     */
+    health(opts?: RequestOptions): Promise<HealthDto> {
+        return this.request({ method: "GET", path: "/health" }, undefined, opts);
+    }
+```
+
+The operations are the same list you hand `buildOpenApi` from `@gusnips/server`, so you write them
+once. `sdk.method` is a name like `sendMessage`, or `numbers.pair` to put the method in a `numbers`
+group. `sdk.returns` is the type `data` holds: `MessageDto`, `NumberDto[]`, or `void` for a 204.
+
+Each method calls `this.request(spec, params, opts)`. Your class declares it and sends the call
+through the transport, below. `sdkMethods` also returns:
+
+- `params`: an `export interface …Params` for each method that takes arguments, written from the
+  operation's `input` schema. A path slot is filled from the field of its name, or the one
+  `params` maps to it.
+- `paramTypes` and `returnTypes`: the names your file has to import.
+
+Four options:
+
+- `namespaces`: the groups, in the order the client lists them. A group missing from the list is an
+  error, so a typo cannot start a new one.
+- `doc(op)`: the method's doc comment, one string per paragraph. Default: the summary, then the
+  description.
+- `specExtra(op)`: more fields on the spec, for your own `request` to read.
+- `inject`: methods you write by hand, such as one that polls a job. They go beside the generated
+  ones and must not take one of their names.
+
+It stops with an error that names the operation when a method name has more than one dot, two
+methods want one name, a 204 returns something, or a path slot is filled by a field the caller may
+leave out.
+
+## Send the calls
+
+Two more files go into the SDK. `transportSource()` is the code that sends each call: it fills the
+path, tries again when that is safe, and turns a failure into your SDK's own error.
+`retrySource()` is the rule it asks, from `@gusnips/http`. Both are plain TypeScript that import
+nothing else, so the SDK installs nothing.
+
+```ts
+import { retrySource, transportSource } from "@gusnips/sdkgen";
+
+const files = {
+  "packages/sdk/src/generated/retry.ts": retrySource(),
+  "packages/sdk/src/generated/transport.ts": transportSource(),
+};
+```
+
+Your client hands its settings to `send`, which returns `{ data, meta }`:
+
+```ts
+import { GeneratedOperations } from "./generated/operations.ts";
+import {
+  send,
+  type RequestOptions,
+  type RequestSpec,
+  type Transport,
+} from "./generated/transport.ts";
+
+export class Example extends GeneratedOperations {
+  private readonly transport: Transport;
+
+  constructor(apiKey: string) {
+    super();
+    this.transport = {
+      baseUrl: "https://api.example.com/v1",
+      headers: { authorization: `Bearer ${apiKey}` },
+      error: (failure) => new ExampleError(failure),
+    };
+  }
+
+  protected async request<T>(spec: RequestSpec, params?: object, opts?: RequestOptions) {
+    return (await send<T>(this.transport, spec, params, opts)).data;
+  }
+}
+```
+
+| Setting                   | Default   | What it does                                                                |
+| ------------------------- | --------- | --------------------------------------------------------------------------- |
+| `baseUrl`                 | required  | Where the API lives, with its base path.                                    |
+| `error(failure)`          | required  | Builds your SDK's error. The transport throws what it returns.              |
+| `headers`                 | none      | Sent on every call.                                                         |
+| `fetch`                   | global    | The fetch to call, such as a fake one in tests.                             |
+| `timeoutMs(spec, params)` | 30,000 ms | How long one try waits for an answer. A call's `opts.timeoutMs` wins.       |
+| `maxRetries`              | 2         | Extra tries after a failure worth repeating.                                |
+| `durableCodes`            | none      | Error codes that waiting does not fix, such as a spent monthly quota.       |
+| `mintKeys`                | false     | Makes up an idempotency key for a call that takes one, so it can try again. |
+
+`failure` has the status (0 when no answer came back), the API's `error`, the `Retry-After` wait,
+the request id, and the idempotency key the call went out with. A call that may have run can be
+sent again with that key, and the API answers from the first run.
+
+A failed call is tried again:
+
+- **After a 408, 425 or 429**, whatever it is. Those say the API did not run it.
+- **After no answer, a 5xx, or a 409 that says when to come back**, only if running it twice is
+  safe. A GET is. A write is when its operation reads an `Idempotency-Key` and the call has one, or
+  when its `sdk.repeatable` is true. A write without a key is not sent twice, because it may
+  already have run.
+- **Never** when the answer says waiting will not help: a code in `durableCodes`,
+  `details.retryAfterSecs: null`, or a wait longer than 10 seconds.
+
+It waits what the `Retry-After` header says, in seconds or as a date, then what
+`details.retryAfterSecs` says. With neither, it waits about 1 second, then 2.
+
 ## Keep the SDK current
 
 ```ts
@@ -108,6 +241,10 @@ error and not "out of date".
 - **A `*/` in a description is broken up**, so it cannot end the doc comment early.
 - **A zod schema needs zod 4.4 or later.** Older versions cannot describe themselves as JSON
   Schema, and the error says so.
+- **A call with a missing path value throws a TypeError** before anything is sent, rather than
+  calling `/numbers//pair`.
+- **An idempotency key on a call that takes none throws.** The API would ignore it, so it could not
+  stop the call running twice.
 
 ## Why it exists
 

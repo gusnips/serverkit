@@ -17,9 +17,11 @@ Entry point for AI agents working on this repo.
   types and nothing else, so it erases and is optional; `hono`, `@supabase/supabase-js`, `pg` and
   `ioredis` are optional and reachable only behind their subpaths.
 - **`@gusnips/sdkgen`** is the part of an SDK generator that every copy wrote the same way: copying
-  the API's own declarations with their comments, writing a JSON Schema as a type, and writing the
-  files through the repo's prettier or checking them. The methods an SDK exposes stay in each
-  adopter's script, because those are the product.
+  the API's own declarations with their comments, writing a JSON Schema as a type, writing the
+  methods from the API's operation list, and writing the files through the repo's prettier or
+  checking them. The transport those methods run on ships as a file each SDK carries, beside
+  `@gusnips/http`'s retry rule, so an SDK installs nothing. What stays in each adopter's script is
+  the product: the names, the doc text and the members written by hand.
 
 MIT · open source · npm scope `@gusnips`
 
@@ -51,10 +53,12 @@ serverkit/
 │   │   ├── bin/          ← one bin, gusnips-migrate, which dispatches its two commands
 │   │   └── test/         ← the throwaway-database helpers the tests share
 │   └── sql/              ← supabase-stand-in.sql, also exported for `psql -f`
-├── sdkgen/               ← @gusnips/sdkgen. One required peer: prettier.
+├── sdkgen/               ← @gusnips/sdkgen. One required peer: prettier. One dependency: @gusnips/http.
 │   └── src/
 │       ├── contract.ts   ← liftContract(): the API's declarations, copied with their comments
 │       ├── types.ts      ← typeOf() and the field, comment and name writers; never a guess
+│       ├── methods.ts    ← sdkMethods(), and retrySource()/transportSource() for the files they run on
+│       ├── transport.ts  ← send(): a template each SDK carries, typechecked and tested here
 │       └── write.ts      ← writeGenerated(): the repo's prettier, then write or --check
 ├── server/               ← @gusnips/server. Each optional peer sits behind its own subpath.
 │   └── src/
@@ -944,11 +948,12 @@ Unhandled error event:", ...)` and returns — it never emits, so Node's throw i
     sends it, and not on 402, which no raise in the fleet sends it on. All 42 planted defects were
     caught, with a green control.
 
-### …and three for `@gusnips/sdkgen`
+### …and four for `@gusnips/sdkgen`
 
-Five backends each wrote an SDK generator, 426 to 616 lines each and 2,517 in all. The methods
-they write differ by product and stay home. What they share is the reader, the schema writer and
-the writer, and those came across with every copy's fixes merged.
+Five backends each wrote an SDK generator, 426 to 616 lines each and 2,517 in all. What they share
+is the reader, the schema writer and the writer, and those came across with every copy's fixes
+merged. The method loop and the transport under it came second: the loop was the same in all five
+once the product's choices (doc text, a spec field, hand-written members) became options.
 
 49. **A schema the writer does not understand throws. It never becomes `unknown`.** A wrong
     `unknown` in a published SDK compiles for everyone who installs it and tells none of them. The
@@ -1007,6 +1012,26 @@ the writer, and those came across with every copy's fixes merged.
     passed: a type zod cannot describe must stop the generator, not become `{}`. One donor did pass
     it. None of its operations needed it, so its output did not change, and the day one does, its
     generator now stops and names the type instead of publishing `unknown`.
+
+52. **The transport asks the retry rule about the answer, and a write is repeatable only with a key
+    the server reads.** Of the five SDKs, three decided from their own error class's `retryAfter`,
+    a number or nothing, so a server's explicit `details.retryAfterSecs: null` never reached the
+    decision; two read the body's wait before the `Retry-After` header and read the header only as
+    seconds, so an HTTP date was no wait at all. `send()` builds the rule's input from the answer's
+    own fields. A call is keyed exactly when its operation's `headers` name an `Idempotency-Key`:
+    one key per call, the same on every attempt. A caller's key on an operation that reads none
+    throws, because it would not be sent, and counting the call as repeatable because it carries
+    one would retry a write nothing deduplicates.
+
+    The transport is a template, `src/transport.ts`, rather than a string, so it is typechecked and
+    tested here; `transportSource()` rewrites its one import to `./retry.ts`. A test generates a
+    whole SDK, typechecks it with DOM types and no Node types (what the SDKs publish with), and
+    calls an API through it. The retry rule is copied from sdkgen's own `@gusnips/http`, never the
+    adopter's, so a release that moves the rule makes every SDK's `--check` fail: that failure is
+    the signal to release the SDK.
+
+    Ten planted defects, seven in the transport and three in the emitter, were each caught by a
+    named test with the file loaded, and every new test was first watched failing against a stub.
 
 ## What the build measured
 
