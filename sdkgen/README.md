@@ -198,6 +198,11 @@ export class Example extends GeneratedOperations {
 | `durableCodes`            | none      | Error codes that waiting does not fix, such as a spent monthly quota.       |
 | `mintKeys`                | false     | Makes up an idempotency key for a call that takes one, so it can try again. |
 
+A call works when the API answers a 2xx with the envelope, a JSON object with `data` and no
+`error`, and the method returns that `data`. A 204 or a 205 works too, and returns `undefined`
+because it has no body. Any other 2xx, such as an empty body, `{}` or `{ "error": … }`, is a
+failure: your `error` gets it with the status and the text, and it is not tried again.
+
 `failure` has the status (0 when no answer came back), the API's `error`, the `Retry-After` wait,
 the request id, the answer's `headers`, and the idempotency key the call went out with. A call that
 may have run can be sent again with that key, and the API answers from the first run.
@@ -228,7 +233,9 @@ A failed call is tried again:
 It waits what the `Retry-After` header says, in seconds or as a date, then what
 `details.retryAfterSecs` says. With neither, it waits about 1 second, then 2.
 
-Every method's last argument takes `timeoutMs` for that one call, and `signal` to stop it. A call
+Every method's last argument takes `timeoutMs` for that one call, and `signal` to stop it. A
+`timeoutMs`, here or from the setting, is a whole number of milliseconds from 1 to 2,147,483,647,
+the longest wait a timer holds. Anything else throws a `RangeError` before the call goes out. A call
 that reads an `Idempotency-Key` also takes `idempotencyKey`. A call stopped by its `signal` throws
 the signal's reason rather than your SDK's error, because nothing failed, and it is not tried
 again, even partway through a wait. `signal` needs `AbortSignal.any`, which Node has from 18.17 and 20.3.

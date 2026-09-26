@@ -365,6 +365,31 @@ describe("send: the request", () => {
     const fallback = await call(WRITE, [offline]);
     expect(thrownFailure(fallback.outcome).timeoutMs).toBe(30_000);
   });
+
+  it.each([-1, 0, 0.5, Number.NaN, Number.POSITIVE_INFINITY, 2_147_483_648])(
+    "refuses a timeout of %s, from the call or the SDK, before sending anything",
+    async (timeoutMs) => {
+      for (const where of [
+        { opts: { timeoutMs } },
+        { transport: { timeoutMs: () => timeoutMs } },
+      ]) {
+        const { calls, outcome } = await call(GET, [ok(1)], where);
+        expect(outcome.ok ? undefined : outcome.error).toEqual(
+          new RangeError(
+            `GET /things: timeoutMs must be a whole number of milliseconds from 1 to 2147483647, not ${timeoutMs}.`,
+          ),
+        );
+        expect(calls).toHaveLength(0);
+      }
+    },
+  );
+
+  it("takes a timeout from 1 ms to the longest a timer holds", async () => {
+    for (const timeoutMs of [1, 2_147_483_647]) {
+      const { outcome } = await call(GET, [ok(1)], { opts: { timeoutMs } });
+      expect(outcome).toEqual({ ok: true, data: 1, meta: undefined });
+    }
+  });
 });
 
 describe("send: the answer", () => {
@@ -373,11 +398,41 @@ describe("send: the answer", () => {
     expect(outcome).toEqual({ ok: true, data: { id: "a" }, meta: { total: 1 } });
   });
 
-  it("gives undefined data for a 204 or an empty 200", async () => {
-    const noContent = await call(WRITE, [() => new Response(null, { status: 204 })]);
-    expect(noContent.outcome).toEqual({ ok: true, data: undefined, meta: undefined });
-    const empty = await call(WRITE, [() => new Response("", { status: 200 })]);
-    expect(empty.outcome).toEqual({ ok: true, data: undefined, meta: undefined });
+  it("gives undefined data for a 204 or a 205, the statuses with no body", async () => {
+    for (const status of [204, 205]) {
+      const { outcome } = await call(WRITE, [() => new Response(null, { status })]);
+      expect(outcome).toEqual({ ok: true, data: undefined, meta: undefined });
+    }
+  });
+
+  it("takes `data: null` as an answer, so a read of something unset still works", async () => {
+    const { outcome } = await call(GET, [ok(null)]);
+    expect(outcome).toEqual({ ok: true, data: null, meta: undefined });
+  });
+
+  // Seven 200s the SDK one adopter replaced refused as an invalid answer. Before, the last four
+  // came out as a success with `data` undefined, typed as the DTO the caller asked for.
+  it.each([
+    ["not json", "not json"],
+    ["null", "null"],
+    ["[]", "[]"],
+    ["", undefined],
+    ["{}", "{}"],
+    ['{"error":{"message":"bad"}}', '{"error":{"message":"bad"}}'],
+    ['{"data":[],"error":{}}', '{"data":[],"error":{}}'],
+  ])(
+    "refuses a 200 of %j, which is not the envelope, and does not send it again",
+    async (body, text) => {
+      const { calls, outcome } = await call(GET, [() => new Response(body, { status: 200 })]);
+      expect(thrownFailure(outcome)).toMatchObject({ status: 200, error: undefined, text });
+      expect(calls).toHaveLength(1);
+    },
+  );
+
+  it("hands over the error a 2xx carries beside its data", async () => {
+    const both = () => Response.json({ data: [], error: { code: "PARTIAL" } });
+    const failure = thrownFailure((await call(GET, [both])).outcome);
+    expect(failure).toMatchObject({ status: 200, error: { code: "PARTIAL" } });
   });
 
   it("hands the error builder the envelope, the wait and the request id", async () => {

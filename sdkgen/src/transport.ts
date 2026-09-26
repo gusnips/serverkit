@@ -116,7 +116,7 @@ export interface Transport {
   error: (failure: Failure) => Error;
 }
 
-/** A call that worked. `data` is `undefined` for a 204 or any other empty answer. */
+/** A call that worked. `data` is `undefined` for a 204 or a 205, which have no body. */
 export interface Answer<T, M> {
   data: T;
   meta: M | undefined;
@@ -124,6 +124,12 @@ export interface Answer<T, M> {
 
 const DEFAULT_TIMEOUT_MS = 30_000;
 const DEFAULT_MAX_RETRIES = 2;
+/**
+ * The longest wait a timer holds. Past it, Node fires the timeout after 1 ms and prints only a
+ * warning. Below 1 or fractional, the runtimes disagree (Node throws a RangeError, Bun a TypeError,
+ * and Bun takes 0.5), so the transport refuses them all itself, the same way everywhere.
+ */
+const MAX_TIMEOUT_MS = 2_147_483_647;
 
 /**
  * Sends one call, retries it while the rule says so, and returns `{ data, meta }` or throws
@@ -150,6 +156,11 @@ export async function send<T = unknown, M = unknown>(
   const repeatable = (spec.repeatable ?? spec.method === "GET") || key !== undefined;
   const request = prepare(transport, spec, params, key);
   const timeoutMs = opts.timeoutMs ?? transport.timeoutMs?.(spec, params) ?? DEFAULT_TIMEOUT_MS;
+  if (!Number.isInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > MAX_TIMEOUT_MS) {
+    throw new RangeError(
+      `${spec.method} ${spec.path}: timeoutMs must be a whole number of milliseconds from 1 to ${MAX_TIMEOUT_MS}, not ${timeoutMs}.`,
+    );
+  }
   const maxRetries = transport.maxRetries ?? DEFAULT_MAX_RETRIES;
   // A local, never `transport.fetch(...)`: called as a method, a browser's fetch gets the
   // settings object as `this` and throws "Illegal invocation".
@@ -292,9 +303,19 @@ async function once<T, M>(
   }
 
   const body = parse(text);
-  if (response.ok && body !== undefined) {
+  // A success is the envelope, `{ data }` with no `error`, or a status that has no body. A 200 of
+  // `{}` or `{ error }` is not the API answering, and taking it would hand the caller `undefined`
+  // typed as its DTO, so it goes to `error` with the rest.
+  const answered =
+    response.status === 204 ||
+    response.status === 205 ||
+    (body !== undefined && Object.hasOwn(body, "data") && !Object.hasOwn(body, "error"));
+  if (response.ok && answered) {
     // The one place the SDK takes the API's word for a type: the contract says what `data` is.
-    return { ok: true, answer: { data: body["data"] as T, meta: body["meta"] as M | undefined } };
+    return {
+      ok: true,
+      answer: { data: body?.["data"] as T, meta: body?.["meta"] as M | undefined },
+    };
   }
   // ponytail: parses the body a second time, on a failure only, so a stream's refusal and a
   // call's are read by one function.
@@ -317,7 +338,7 @@ export function failureOf(
     method: call.method,
     path: call.path,
     timeoutMs: call.timeoutMs,
-    // A 2xx lands here only when its body is not JSON, which is not the API answering.
+    // A 2xx lands here when its body is not the envelope, which is not the API answering.
     status: response.status,
     timedOut: false,
     error,
@@ -330,9 +351,8 @@ export function failureOf(
   };
 }
 
-/** The body as a JSON object: `{}` when empty, `undefined` when it is not a JSON object. */
+/** The body as a JSON object, or `undefined` when it is empty or not a JSON object. */
 function parse(text: string): Record<string, unknown> | undefined {
-  if (text === "") return {};
   try {
     const value: unknown = JSON.parse(text);
     return isRecord(value) ? value : undefined;
