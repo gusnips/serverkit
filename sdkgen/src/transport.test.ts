@@ -424,3 +424,58 @@ describe("send: the answer", () => {
     });
   });
 });
+
+describe("send: the caller's signal", () => {
+  const reason = new Error("The reader closed the page.");
+
+  it("sends nothing when the signal has already aborted, and throws its reason", async () => {
+    const controller = new AbortController();
+    controller.abort(reason);
+    const { calls, outcome } = await call(GET, [ok({})], { opts: { signal: controller.signal } });
+    expect(calls).toHaveLength(0);
+    expect(outcome).toEqual({ ok: false, error: reason });
+  });
+
+  it("stops a call that is out, throws the reason rather than the SDK's error, and never retries", async () => {
+    const controller = new AbortController();
+    let sent = 0;
+    // A fetch as the transport calls it: two arguments, no cast.
+    const fetch = (_url: string, init: RequestInit) => {
+      sent++;
+      return new Promise<Response>((_resolve, reject) => {
+        init.signal?.addEventListener("abort", () => reject(init.signal?.reason));
+        controller.abort(reason);
+      });
+    };
+    const { outcome } = await call(GET, [ok({})], {
+      opts: { signal: controller.signal },
+      transport: { fetch },
+    });
+    expect(outcome).toEqual({ ok: false, error: reason });
+    expect(sent).toBe(1);
+  });
+
+  it("stops during the wait before a retry, without waiting it out", async () => {
+    const controller = new AbortController();
+    const start = Date.now();
+    const unavailable: Reply = () => {
+      setTimeout(() => controller.abort(reason), 100);
+      return refuse(503)();
+    };
+    const { calls, outcome } = await call(GET, [unavailable, ok({})], {
+      opts: { signal: controller.signal },
+    });
+    expect(outcome).toEqual({ ok: false, error: reason });
+    expect(calls).toHaveLength(1);
+    expect(Date.now() - start).toBe(100);
+  });
+
+  it("still times an attempt out, and reports it as the SDK's error", async () => {
+    const controller = new AbortController();
+    const timeout: Reply = () => {
+      throw new DOMException("The operation timed out.", "TimeoutError");
+    };
+    const { outcome } = await call(WRITE, [timeout], { opts: { signal: controller.signal } });
+    expect(failureOf(outcome)).toMatchObject({ status: 0, timedOut: true });
+  });
+});

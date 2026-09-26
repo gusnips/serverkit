@@ -192,7 +192,7 @@ export class Example extends GeneratedOperations {
 | `baseUrl`                 | required  | Where the API lives, with its base path.                                    |
 | `error(failure)`          | required  | Builds your SDK's error. The transport throws what it returns.              |
 | `headers`                 | none      | Sent on every call.                                                         |
-| `fetch`                   | global    | The fetch to call, such as a fake one in tests.                             |
+| `fetch`                   | global    | `(url, init) => Promise<Response>`, such as a fake one in tests.            |
 | `timeoutMs(spec, params)` | 30,000 ms | How long one try waits for an answer. A call's `opts.timeoutMs` wins.       |
 | `maxRetries`              | 2         | Extra tries after a failure worth repeating.                                |
 | `durableCodes`            | none      | Error codes that waiting does not fix, such as a spent monthly quota.       |
@@ -214,6 +214,11 @@ A failed call is tried again:
 
 It waits what the `Retry-After` header says, in seconds or as a date, then what
 `details.retryAfterSecs` says. With neither, it waits about 1 second, then 2.
+
+Every method's last argument takes `timeoutMs` for that one call, and `signal` to stop it. A call
+that reads an `Idempotency-Key` also takes `idempotencyKey`. A call stopped by its `signal` throws
+the signal's reason rather than your SDK's error, because nothing failed, and it is not tried
+again, even partway through a wait. `signal` needs `AbortSignal.any`, which Node has from 18.17 and 20.3.
 
 ## Keep the SDK current
 

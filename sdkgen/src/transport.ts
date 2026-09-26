@@ -42,6 +42,11 @@ export interface RequestOptions {
   idempotencyKey?: string;
   /** How long one attempt waits for an answer, in milliseconds. Overrides the SDK's. */
   timeoutMs?: number;
+  /**
+   * Stops the call, and any retry of it, when it aborts. The call then throws the signal's reason
+   * rather than the SDK's error, because nothing failed: you asked it to stop.
+   */
+  signal?: AbortSignal;
 }
 
 /** The `error` of the envelope, as the answer carried it. */
@@ -85,8 +90,11 @@ export interface Transport {
   baseUrl: string;
   /** Sent on every call, such as the credential and the SDK's version. */
   headers?: Readonly<Record<string, string>>;
-  /** Default: the global `fetch`. */
-  fetch?: typeof fetch;
+  /**
+   * Default: the global `fetch`. Typed as the one way the transport calls it, so a test's fake
+   * needs no cast.
+   */
+  fetch?: (url: string, init: RequestInit) => Promise<Response>;
   /** How long one attempt of this call waits for an answer, in milliseconds. Default 30,000. */
   timeoutMs?: (spec: RequestSpec, params: object) => number;
   /** Extra attempts after a failure the retry rule says is worth repeating. Default 2. */
@@ -140,10 +148,14 @@ export async function send<T = unknown, M = unknown>(
   // A local, never `transport.fetch(...)`: called as a method, a browser's fetch gets the
   // settings object as `this` and throws "Illegal invocation".
   const fetchImpl = transport.fetch ?? globalThis.fetch;
+  const { signal } = opts;
+  signal?.throwIfAborted();
 
   for (let attempt = 0; ; attempt++) {
-    const outcome = await once<T, M>(fetchImpl, request, timeoutMs);
+    const outcome = await once<T, M>(fetchImpl, request, timeoutMs, signal);
     if (outcome.ok) return outcome.answer;
+    // The caller stopped it, so there is nothing to report and nothing to retry.
+    signal?.throwIfAborted();
     const failure: Failure = { ...outcome.failure, idempotencyKey: key };
     // The rule reads these fields as the answer sent them: the header's wait apart from the
     // body's, and `details` untouched, so an explicit `retryAfterSecs: null` still says never.
@@ -157,8 +169,23 @@ export async function send<T = unknown, M = unknown>(
       attempt < maxRetries &&
       shouldRetry(answer, { repeatable, durableCodes: transport.durableCodes });
     if (!again) throw transport.error(failure);
-    await new Promise((resolve) => setTimeout(resolve, retryDelayMs(attempt, answer)));
+    await sleep(retryDelayMs(attempt, answer), signal);
   }
+}
+
+/** Waits `ms`, or rejects with the signal's reason the moment it aborts. */
+function sleep(ms: number, signal: AbortSignal | undefined): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      signal?.removeEventListener("abort", stop);
+      resolve();
+    }, ms);
+    function stop() {
+      clearTimeout(timer);
+      reject(signal?.reason);
+    }
+    signal?.addEventListener("abort", stop, { once: true });
+  });
 }
 
 interface Prepared {
@@ -223,10 +250,12 @@ function prepare(
 
 /** One attempt. Never throws: a failure is a value, so the loop can ask the rule about it. */
 async function once<T, M>(
-  fetchImpl: typeof fetch,
+  fetchImpl: NonNullable<Transport["fetch"]>,
   request: Prepared,
   timeoutMs: number,
+  signal: AbortSignal | undefined,
 ): Promise<Outcome<T, M>> {
+  const timeout = AbortSignal.timeout(timeoutMs);
   const base = { method: request.method, path: request.path, timeoutMs };
   let response: Response;
   let text: string;
@@ -235,7 +264,7 @@ async function once<T, M>(
       method: request.method,
       headers: request.headers,
       body: request.body,
-      signal: AbortSignal.timeout(timeoutMs),
+      signal: signal === undefined ? timeout : AbortSignal.any([signal, timeout]),
     });
     // Inside the try: a connection that drops halfway through the body is no answer either.
     text = await response.text();
