@@ -1439,6 +1439,7 @@ await mailer.send({ to: user.email, subject: "Your code", text: `Your code is ${
 - **Port 465 is TLS from the first byte.** nodemailer picks that from the port, so there is no
   `secure` option to get wrong.
 - **`text` is required**, even when you send `html`. Spam filters mark down mail without it.
+  `textFromHtml` (below) writes it from your HTML.
 - **`unsubscribeUrl`** writes both unsubscribe headers (below).
 - `send` returns the `messageId`, and the addresses the server `rejected` while it took the others.
   It throws when the server refuses the whole message.
@@ -1448,6 +1449,26 @@ socket (Bun #32239), but only while that socket is paused, and nodemailer never 
 tested Bun 1.3.8 and 1.4.2.
 
 `nodemailer` is an optional peer, behind the `/mail` subpath.
+
+### The text part
+
+```ts
+import { textFromHtml } from "@gusnips/server";
+
+textFromHtml('<p>Your invoice is due.</p><a href="https://acme.test/pay">Pay now</a>');
+// → "Your invoice is due.\n\nPay now: https://acme.test/pay"
+```
+
+It writes a mail's text part from its HTML, and every link keeps its address. A backend that
+stripped the tags instead sent payment reminders that said "Pay now" and gave no address to pay at.
+
+- It takes a fragment or a whole page. The head, styles, scripts, comments and images are dropped.
+- A link reads `label: address`, or just the address when the label already says it.
+- Paragraphs, headings, lists and tables end in a blank line. `<br>`, table rows and `<div>` end in
+  a line break. Never more than one blank line in a row.
+- HTML with no words gives `""`, and `send` refuses an empty text part. A mail that is only an
+  image needs a sentence.
+- It has no dependencies and runs in a Worker, so its result fits Resend's `text` too.
 
 ### The unsubscribe headers
 

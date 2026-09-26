@@ -31,6 +31,7 @@ import {
   safeEqual,
   signToken,
   signWebhook,
+  textFromHtml,
   validateEnv,
   verifyToken,
   verifyWebhook,
@@ -609,6 +610,14 @@ describe("README — a reference for your API", () => {
     expect(JSON.stringify(pair?.["responses"])).toContain(
       '"data":{"type":"object","properties":{"status":{"type":"string"}}',
     );
+  });
+});
+
+describe("README — the text part", () => {
+  it("keeps the link's address", () => {
+    expect(
+      textFromHtml('<p>Your invoice is due.</p><a href="https://acme.test/pay">Pay now</a>'),
+    ).toBe("Your invoice is due.\n\nPay now: https://acme.test/pay");
   });
 });
 

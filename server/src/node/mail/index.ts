@@ -10,7 +10,7 @@
  *   Measured on nodemailer 6.10.1, 7.0.13 and 10.0.10, on Node and Bun. With a login set, this
  *   mailer refuses to go on without TLS.
  * - **A text part is required.** One backend sent HTML only, which spam filters mark down and a
- *   text-only mail client cannot show.
+ *   text-only mail client cannot show. `textFromHtml`, at the root, writes one from the HTML.
  * - **One-click unsubscribe is two headers**, and nodemailer's own option writes one. See
  *   `listUnsubscribeHeaders`.
  * - **Port 587 is safe on Bun.** After STARTTLS, Bun keeps a copy of the encrypted bytes on the
@@ -62,7 +62,10 @@ export interface MailMessage {
   to: string | string[];
   cc?: string | string[];
   subject: string;
-  /** Required, even beside `html`: spam filters mark down mail without it. */
+  /**
+   * Required, even beside `html`: spam filters mark down mail without it. `textFromHtml` writes it
+   * from the HTML.
+   */
   text: string;
   html?: string;
   replyTo?: string;

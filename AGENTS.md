@@ -82,6 +82,7 @@ serverkit/
 │       ├── seal.ts       ← createSealer(): AES-GCM for a secret you store, with a key id to rotate
 │       ├── token.ts      ← signToken() and verifyToken(): a link that proves who it is for
 │       ├── unsubscribe.ts← listUnsubscribeHeaders(): both one-click headers, for any sender
+│       ├── text-from-html.ts ← textFromHtml(): a mail's text part from its HTML, addresses kept
 │       ├── env.ts        ← validateEnv(): every problem with the environment, in one error
 │       ├── node/         ← the one directory allowed Node: fetchPublic(), scryptSealKey() and the drain
 │       │   └── mail/     ← createMailer(), the /mail subpath: SMTP needs a socket a Worker lacks
@@ -810,6 +811,13 @@ Unhandled error event:", ...)` and returns — it never emits, so Node's throw i
     is required because one sender sent HTML only. The one-click header pair is a pure function at
     the root, tested on the bytes that went out, because two senders passed nodemailer's `comment`
     form and tested the options object, which put the second header inside the first.
+
+    **A text part keeps every link's address.** One sender built its text part by stripping tags,
+    so its payment reminders said "Pay now" with no address. The next sent HTML only, as whole
+    documents with a head and a style block. `textFromHtml` reads both, at the root beside the
+    header pair, since neither needs a socket. It decodes entities in one pass, so `&amp;lt;`
+    reads `&lt;`, and HTML with no words gives `""` rather than a stand-in: `send` refuses it,
+    which is how a mail that is only an image gets noticed before it goes out.
 
     **Port 587 is safe on Bun, and the reason is narrower than "Bun is fine".** Bun #32239 keeps a
     copy of the ciphertext on the plain socket after a STARTTLS upgrade, and a sibling project moved
