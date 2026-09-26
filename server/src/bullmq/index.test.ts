@@ -386,6 +386,9 @@ describe.skipIf(!hasRedisServer)("against a real Redis", () => {
       await queue.upsertJobScheduler("renamed-away", { pattern: "0 3 * * *", tz: "UTC" });
       // Its first run is due at once, so it is waiting rather than delayed.
       await queue.upsertJobScheduler("due-now", { every: 60_000 });
+      // BullMQ 6 removed `repeat` from add(), so this line compiles on 5 only, which the kit is
+      // developed on. On 6, the sync lists and removes a repeat that 5 wrote: measured by writing
+      // two with 5.81.5 and syncing with 6.3.9, which removed both and their next runs.
       await queue.add("before-schedulers", {}, { repeat: { every: 60_000 } });
       // A scheduler whose record is gone: BullMQ lists it as null.
       await redis.zadd(`${at.prefix}:maintenance:repeat`, Date.now() + 60_000, "ghost");

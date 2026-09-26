@@ -99,8 +99,8 @@
     "hono": ">=4.9.9 <5",
     "@supabase/supabase-js": ">=2.91 <3",
     "pg": ">=8.13 <9",
-    "ioredis": ">=5.6 <6",
-    "bullmq": ">=5.76 <6",
+    "ioredis": ">=5.6 <7",
+    "bullmq": ">=5.76 <7",
     "nodemailer": ">=6.10 <11",
     "@modelcontextprotocol/sdk": ">=1.29 <2"
   },

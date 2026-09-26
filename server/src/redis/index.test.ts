@@ -232,11 +232,18 @@ async function unreachableWithAWaitingPing() {
 /** A Redis that accepted the connection and then froze: nothing it is sent is ever answered. */
 async function frozenRedis() {
   const sockets = new Set<Socket>();
-  const server = createServer((socket) => void sockets.add(socket));
+  const server = createServer((socket) => {
+    sockets.add(socket);
+    // ioredis 6 opens with HELLO 3 and is not ready until it hears back. Refuse it the way Redis 5
+    // does, so it falls back to RESP2; ioredis 5 never sends it. Everything after that is ignored.
+    socket.once("data", (chunk) => {
+      if (/hello/i.test(chunk.toString())) socket.write("-ERR unknown command 'HELLO'\r\n");
+    });
+  });
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   const { port } = server.address() as AddressInfo;
-  // No ready check and no CLIENT SETINFO, so the connection is "ready" once the socket opens:
-  // the same state as a real Redis that answered those and froze afterwards.
+  // No ready check and no CLIENT SETINFO, so the connection is "ready" once the handshake is
+  // done: the same state as a real Redis that answered those and froze afterwards.
   const redis = createRedis({
     url: `redis://127.0.0.1:${port}`,
     enableReadyCheck: false,

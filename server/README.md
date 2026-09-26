@@ -698,6 +698,9 @@ it decides when your process can exit.
 `ioredis` is an optional peer, behind the `/redis` subpath, so importing `@gusnips/server` never
 installs it.
 
+Versions 5 and 6 both work. Version 6 speaks RESP3 unless the server is older than Redis 6, and
+then falls back.
+
 ## Background jobs
 
 Queues and workers for BullMQ, on the connection `createRedis` gives you:
@@ -767,6 +770,11 @@ clock. An entry you delete or rename stops running: the sync removes every sched
 that the table does not name, so give the table a queue of its own.
 
 `bullmq` is an optional peer, behind the `/bullmq` subpath.
+
+Versions 5 and 6 both work, with one pairing to avoid: BullMQ 5 with ioredis 6 runs, but fails your
+typecheck. BullMQ 5 brings its own ioredis 5, and its types refuse a version 6 client, so move both
+to 6 together. BullMQ 6 also dropped the `repeat` option on `add()`. `syncJobSchedulers` still
+removes a repeat that version 5 created, with its next run.
 
 ## A rate limit
 
