@@ -20,11 +20,11 @@
  */
 import { parseRetryAfter, retryDelayMs, shouldRetry } from "@gusnips/http/retry";
 
-export type HttpMethod = "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
-
 /** What a generated method tells the transport about its operation. */
 export interface RequestSpec {
-  method: HttpMethod;
+  // Spelled out rather than named: an SDK re-exports these types, not the transport, so a named
+  // alias would leave its public types naming something nobody can import.
+  method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
   /** `/numbers/:numberId/pair`. Each `:name` is filled from the params field of that name. */
   path: string;
   /** The operation reads an `Idempotency-Key`, so the server answers a repeat from the first run. */
@@ -62,7 +62,7 @@ export interface EnvelopeError {
 
 /** A call that did not work, as `error` gets it to build the SDK's own error. */
 export interface Failure {
-  method: HttpMethod;
+  method: RequestSpec["method"];
   /** The path with its values filled in: `/numbers/n_1/pair`. */
   path: string;
   /** The HTTP status, or 0 when no answer came back: offline, a dropped connection, a timeout. */
@@ -189,7 +189,7 @@ function sleep(ms: number, signal: AbortSignal | undefined): Promise<void> {
 }
 
 interface Prepared {
-  method: HttpMethod;
+  method: RequestSpec["method"];
   path: string;
   url: string;
   headers: Headers;
