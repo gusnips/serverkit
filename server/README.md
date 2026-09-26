@@ -769,8 +769,9 @@ await retryStalledFailures(reports);
   down, `worker.close()` never returns: see [Stopping for a deploy](#stopping-for-a-deploy).
 - **`retryStalledFailures` re-runs the jobs a deploy killed.** Two deploys during one long job use
   up its two retries. It only matches the reason BullMQ writes, so a job that failed with the word
-  "stalled" in its own error stays failed. Never call it on a queue whose jobs must run at most
-  once.
+  "stalled" in its own error stays failed. A job that leaves the failed set while it runs is
+  skipped, so two processes starting at once can both call it. Never call it on a queue whose jobs
+  must run at most once.
 - **`isStalledOut(job)`** is for a `failed` listener. It is true when BullMQ gave up on the job
   because its worker kept dying, not because the job threw. BullMQ never runs your code again for
   that job, so if the job was driving a row, set the row's status here. "We lost the worker" is a

@@ -237,6 +237,10 @@ export function isStalledOut(job: Job | undefined): job is Job & { finishedOn: n
  *
  * It matches BullMQ's reason exactly, so a job that failed on its own, even with "stalled" in its
  * error, stays failed. Never call it on a queue whose jobs must run at most once.
+ *
+ * A job that leaves the failed set while this runs is skipped, not an error: something removed
+ * it, or a second process starting at the same time retried it first. Stopping there would leave
+ * every job after it failed.
  */
 export async function retryStalledFailures(
   queue: Queue,
@@ -248,7 +252,13 @@ export async function retryStalledFailures(
   let retried = 0;
   for (const job of await queue.getFailed(0, limit - 1)) {
     if (!isStalledOut(job)) continue;
-    await job.retry();
+    try {
+      await job.retry();
+    } catch (error) {
+      // Ask Redis where the job is rather than read BullMQ's error text, which is not an API.
+      if ((await queue.getJobState(job.id ?? "")) !== "failed") continue;
+      throw error;
+    }
     retried++;
   }
   return retried;

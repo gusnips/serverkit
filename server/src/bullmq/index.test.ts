@@ -339,6 +339,42 @@ describe.skipIf(!hasRedisServer)("against a real Redis", () => {
       expect((await queue.getFailed()).map((job) => job.name)).toEqual(["sync"]);
     }, 15_000);
 
+    it("skips a job that left the failed set after it was listed, and retries the rest", async () => {
+      const at = on();
+      const queue = track(createQueue("long", at));
+      // Throwing BullMQ's own reason fails a job exactly as a stall-out does, without the wait.
+      const ran: string[] = [];
+      let firstRun = true;
+      track(
+        createWorker(
+          "long",
+          async (job) => {
+            if (firstRun) throw new Error("job stalled more than allowable limit");
+            ran.push(job.name);
+          },
+          at,
+        ),
+      );
+      const removed = await queue.add("removed", {});
+      const retriedElsewhere = await queue.add("retried-elsewhere", {});
+      await queue.add("left", {});
+      await eventually(async () => (await queue.getFailedCount()) === 3);
+      firstRun = false;
+
+      // Between the listing and the retries, one job is removed and another process retries one.
+      const list = queue.getFailed.bind(queue);
+      vi.spyOn(queue, "getFailed").mockImplementationOnce(async (...range) => {
+        const failed = await list(...range);
+        await removed.remove();
+        await retriedElsewhere.retry();
+        return failed;
+      });
+      expect(await retryStalledFailures(queue)).toBe(1);
+      await eventually(() => ran.length === 2);
+      expect(ran.sort()).toEqual(["left", "retried-elsewhere"]);
+      expect(await queue.getFailedCount()).toBe(0);
+    });
+
     it("refuses a limit that is not a whole number above 0", async () => {
       const queue = track(createQueue("long", on()));
       for (const limit of [0, -1, 1.5])
