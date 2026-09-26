@@ -105,7 +105,7 @@ const { members } = sdkMethods([
     /**
      * Check the API is up.
      */
-    health(opts?: RequestOptions): Promise<HealthDto> {
+    health(opts?: Omit<RequestOptions, "idempotencyKey">): Promise<HealthDto> {
         return this.request({ method: "GET", path: "/health" }, undefined, opts);
     }
 ```
@@ -123,6 +123,10 @@ through the transport, below. `sdkMethods` also returns:
   operation's `input` schema. A path slot is filled from the field of its name, or the one
   `params` maps to it.
 - `paramTypes` and `returnTypes`: the names your file has to import.
+- `routes`: where each generated method sends its call, keyed by the method. Here that is
+  `{ health: { method: "GET", path: "/health", pathParams: [] } }`. A slot in `path` carries the
+  argument's name, and `pathParams` lists those arguments in path order. Use it for a docs page
+  that shows a REST call beside the SDK call that makes it.
 
 Four options:
 
@@ -246,7 +250,8 @@ error and not "out of date".
 - **A call with a missing path value throws a TypeError** before anything is sent, rather than
   calling `/numbers//pair`.
 - **An idempotency key on a call that takes none throws.** The API would ignore it, so it could not
-  stop the call running twice.
+  stop the call running twice. The method's type refuses it first: only a call that takes a key
+  accepts `idempotencyKey` in its options.
 
 ## Why it exists
 

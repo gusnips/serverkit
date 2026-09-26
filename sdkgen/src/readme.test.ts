@@ -28,7 +28,7 @@ describe("README", () => {
     expect(
       fieldsOf({ type: "object", properties: { "content-type": { type: "string" } } }, ""),
     ).toBe('"content-type"?: string;\n');
-    const { members } = sdkMethods([
+    const { members, routes } = sdkMethods([
       {
         name: "health",
         method: "get",
@@ -41,9 +41,10 @@ describe("README", () => {
     /**
      * Check the API is up.
      */
-    health(opts?: RequestOptions): Promise<HealthDto> {
+    health(opts?: Omit<RequestOptions, "idempotencyKey">): Promise<HealthDto> {
         return this.request({ method: "GET", path: "/health" }, undefined, opts);
     }
 `);
+    expect(routes).toEqual({ health: { method: "GET", path: "/health", pathParams: [] } });
   });
 });

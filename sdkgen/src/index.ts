@@ -8,6 +8,7 @@ export {
   type SdkMethodsOptions,
   type SdkOperation,
   type SdkPlacement,
+  type SdkRoute,
 } from "./methods.ts";
 export {
   camelCase,

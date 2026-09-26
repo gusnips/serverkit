@@ -89,7 +89,7 @@ describe("sdkMethods", () => {
         /**
          * Read a number.
          */
-        get: (params: GetNumberParams, opts?: RequestOptions): Promise<NumberDto> =>
+        get: (params: GetNumberParams, opts?: Omit<RequestOptions, "idempotencyKey">): Promise<NumberDto> =>
             this.request({ method: "GET", path: "/numbers/:numberId" }, params, opts),
     };
 `);
@@ -131,9 +131,11 @@ export interface DeleteNumberParams {
   it("makes params optional when nothing in them is required, and takes none without input", () => {
     const { members } = sdkMethods([LIST_NUMBERS, HEALTH]);
     expect(members).toContain(
-      "list: (params?: ListNumbersParams, opts?: RequestOptions): Promise<Page<NumberDto>> =>",
+      'list: (params?: ListNumbersParams, opts?: Omit<RequestOptions, "idempotencyKey">): Promise<Page<NumberDto>> =>',
     );
-    expect(members).toContain("health(opts?: RequestOptions): Promise<HealthDto> {");
+    expect(members).toContain(
+      'health(opts?: Omit<RequestOptions, "idempotencyKey">): Promise<HealthDto> {',
+    );
     expect(members).toContain(`this.request({ method: "GET", path: "/health" }, undefined, opts);`);
   });
 
@@ -179,10 +181,33 @@ export interface DeleteNumberParams {
       "    /**\n     * Check the API is up.\n     *\n     * `GET /v1/health`\n     */\n",
     );
     expect(sdkMethods([HEALTH], { doc: () => [] }).members).toBe(`
-    health(opts?: RequestOptions): Promise<HealthDto> {
+    health(opts?: Omit<RequestOptions, "idempotencyKey">): Promise<HealthDto> {
         return this.request({ method: "GET", path: "/health" }, undefined, opts);
     }
 `);
+  });
+
+  it("hands back each generated method's route, with the arguments that fill its path", () => {
+    const renamed: SdkOperation = {
+      ...GET_NUMBER,
+      name: "pairNumber",
+      method: "post",
+      path: "/numbers/:id/pair/:slot{[0-9]+}",
+      input: z.object({ numberId: z.string(), slot: z.number() }),
+      params: { numberId: "id" },
+      sdk: { method: "numbers.pair", returns: "NumberDto" },
+    };
+    const { routes } = sdkMethods([renamed, HEALTH, INTERNAL], {
+      inject: [{ method: "numbers.watch", signature: "(): void", call: "undefined" }],
+    });
+    expect(routes).toEqual({
+      "numbers.pair": {
+        method: "POST",
+        path: "/numbers/:numberId/pair/:slot",
+        pathParams: ["numberId", "slot"],
+      },
+      health: { method: "GET", path: "/health", pathParams: [] },
+    });
   });
 
   it("adds the spec fields the hook gives, quoting a key that needs it", () => {
@@ -411,6 +436,16 @@ ${members}}
 `,
         "retry.ts": retrySource(),
         "transport.ts": transportSource(),
+        "uses.ts": `import type { Example } from "./client.ts";
+
+// What a caller may pass, and what it may not. Typechecked, never run.
+export function uses(client: Example): void {
+    void client.sendMessage({ to: "a", text: "hi" }, { idempotencyKey: "k", timeoutMs: 5_000 });
+    void client.numbers.get({ numberId: "n1" }, { timeoutMs: 5_000 });
+    // @ts-expect-error numbers.get takes no key, and the transport would throw on one
+    void client.numbers.get({ numberId: "n1" }, { idempotencyKey: "k" });
+}
+`,
         "client.ts": `import { GeneratedOperations } from "./operations.ts";
 import { send, type Failure, type RequestOptions, type RequestSpec, type Transport } from "./transport.ts";
 
@@ -455,7 +490,7 @@ export class Example extends GeneratedOperations {
     const dir = await sdk();
     // The flags the SDKs on this stack publish with. DOM and no Node types: an SDK runs wherever
     // fetch does, so the transport may lean on nothing only Node has.
-    const errors = typeErrors(join(dir, "client.ts"), {
+    const errors = typeErrors(join(dir, "uses.ts"), {
       lib: ["lib.esnext.d.ts", "lib.dom.d.ts"],
       types: [],
       noImplicitOverride: true,

@@ -107,6 +107,21 @@ export interface SdkMethods {
   paramTypes: string[];
   /** The declared types the `returns` name, sorted, for their import from the contract. */
   returnTypes: string[];
+  /**
+   * Each generated method's route as the SDK spells it, keyed by the method: `numbers.get` →
+   * `{ method: "GET", path: "/numbers/:numberId", pathParams: ["numberId"] }`. For a page that
+   * shows a REST call beside the SDK call that makes it. Hand-written members have none.
+   */
+  routes: Record<string, SdkRoute>;
+}
+
+/** Where a generated method sends its call. */
+export interface SdkRoute {
+  method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
+  /** The path with each slot named for the argument that fills it: `/numbers/:numberId`. */
+  path: string;
+  /** The arguments that fill the path, in the order the path has them. */
+  pathParams: string[];
 }
 
 /** Success statuses with no body (RFC 9110), the same three the server's reference documents so. */
@@ -119,6 +134,8 @@ const RESERVED = new Set(["request", "constructor"]);
 const SPEC_FIELDS = new Set(["method", "path", "keyed", "repeatable"]);
 
 const IDENTIFIER = /^[A-Za-z_$][\w$]*$/;
+
+const VERB = { get: "GET", post: "POST", put: "PUT", patch: "PATCH", delete: "DELETE" } as const;
 
 interface Member {
   /** Who asked for it, for an error message. */
@@ -150,6 +167,7 @@ export function sdkMethods(
   const params: string[] = [];
   const paramTypes: string[] = [];
   const returnTypes = new Set<string>();
+  const routes: Record<string, SdkRoute> = {};
 
   for (const op of operations) {
     const sdk = op.sdk;
@@ -176,12 +194,16 @@ export function sdkMethods(
         ? listed.filter((f): f is string => typeof f === "string" && !fixed.includes(f))
         : [],
     );
-    const fields = [
-      `method: "${op.method.toUpperCase()}"`,
-      `path: ${JSON.stringify(sdkPath(op, required, where))}`,
-    ];
-    if (op.headers?.some((h) => h.name.toLowerCase() === "idempotency-key"))
-      fields.push("keyed: true");
+    const method = VERB[op.method];
+    const path = sdkPath(op, required, where);
+    routes[sdk.method] = {
+      method,
+      path,
+      pathParams: [...path.matchAll(/:(\w+)/g)].flatMap((match) => match[1] ?? []),
+    };
+    const fields = [`method: "${method}"`, `path: ${JSON.stringify(path)}`];
+    const keyed = op.headers?.some((h) => h.name.toLowerCase() === "idempotency-key") === true;
+    if (keyed) fields.push("keyed: true");
     if (sdk.repeatable !== undefined) fields.push(`repeatable: ${sdk.repeatable}`);
     for (const [key, value] of Object.entries(specExtra?.(op) ?? {})) {
       if (SPEC_FIELDS.has(key)) {
@@ -193,11 +215,14 @@ export function sdkMethods(
     }
 
     const argument = iface === null ? "" : `params${iface.optional ? "?" : ""}: ${typeName}, `;
+    // A key on a call that takes none is refused by the transport at runtime; the type refuses it
+    // first, where the caller's editor shows it.
+    const options = keyed ? "RequestOptions" : `Omit<RequestOptions, "idempotencyKey">`;
     members.push({
       where,
       ...place(sdk.method, where),
       doc: doc(op),
-      signature: `(${argument}opts?: RequestOptions): Promise<${sdk.returns}>`,
+      signature: `(${argument}opts?: ${options}): Promise<${sdk.returns}>`,
       call: `this.request({ ${fields.join(", ")} }, ${iface === null ? "undefined" : "params"}, opts)`,
     });
   }
@@ -217,6 +242,7 @@ export function sdkMethods(
     members: writeMembers(members, options.namespaces),
     paramTypes: paramTypes.sort(),
     returnTypes: [...returnTypes].sort(),
+    routes,
   };
 }
 
