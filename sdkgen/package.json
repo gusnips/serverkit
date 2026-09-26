@@ -48,6 +48,9 @@
     "release:minor": "bun pm version minor && bun publish --access public",
     "release:major": "bun pm version major && bun publish --access public"
   },
+  "dependencies": {
+    "@gusnips/http": "^0.1.5"
+  },
   "peerDependencies": {
     "prettier": ">=3.4 <4"
   },
