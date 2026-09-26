@@ -1,6 +1,6 @@
 {
   "name": "@gusnips/sdkgen",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "The pieces of an SDK generator: copy your API's types with their comments, write a schema as a TypeScript type, and keep the output current.",
   "type": "module",
   "license": "MIT",
