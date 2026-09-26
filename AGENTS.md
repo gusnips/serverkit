@@ -539,6 +539,18 @@ Infinity` default turns a typo'd `DATABASE_URL` into a boot that hangs instead o
     second, and reading the config comment is what separates them — it says, out loud, that the
     command timeout was "removed to allow BullMQ operations to complete properly".
 
+    **A bound on `queue.add()` ends the request and not the add.** The README said to bound the
+    add of a queue built on first use, and a guide built on the kit found a queue built at boot
+    waiting too. Measured with this connection and a stopped Redis: `add()` waited the whole
+    35-second outage, and a 2-second timer around it failed the request while the job was still
+    added once Redis came back. Checking `status === "ready"` first sends nothing while the client
+    is `reconnecting`. `maxRetriesPerRequest: 1` failed that add in 0.3 seconds too, and neither
+    helps against a paused Redis: the socket stays open, the status stays `ready`, and the add
+    waited all 35 seconds, then landed. `worker.close()` hangs the way a bare `quit()` does (see
+    `quitRedis`): without `force`, BullMQ quits the worker's own blocking connection and waits for
+    an answer that never comes. Measured still waiting at 40 seconds, idle or busy, while
+    `close(true)` disconnects instead and returned in 2 ms.
+
     **And the `null` could be undone from the URL, with nothing in the code to show it.** ioredis
     reads options from `REDIS_URL`'s query, lets them beat the options passed beside it, and keeps
     each as a string, so `?maxRetriesPerRequest=7` replaced the kit's `null` and

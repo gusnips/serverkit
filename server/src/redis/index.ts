@@ -64,7 +64,9 @@ export interface CreateRedisOptions extends RedisOptions {
  *
  * **Every read on this connection must carry its own bound.** A `ping`, a cache lookup, a
  * limiter check, a `queue.add()` — with Redis down, each waits indefinitely rather than
- * failing. {@link pingRedis} is the worked example. One backend in this fleet enqueues inbound
+ * failing. {@link pingRedis} is the worked example. An `add()` needs more than a bound: a timer
+ * ends the request, and the job is still added once Redis comes back (measured, 35 seconds down),
+ * so check `status === "ready"` before adding. One backend in this fleet enqueues inbound
  * webhooks on a connection like this with nothing bounding the enqueue, so during a Redis outage
  * each webhook holds its HTTP connection until the caller gives up, and its `/health` — which
  * probes Postgres only — stays green throughout.

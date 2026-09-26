@@ -633,16 +633,33 @@ wait forever — because BullMQ requires it, since its blocking reads must never
 retry limit. So the default is right and it has a consequence worth saying once:
 
 **every read on this connection needs its own bound.** A `ping`, a cache lookup, a limiter
-check, a `queue.add()` — with Redis down, each waits rather than failing. Pass
-`maxRetriesPerRequest: 3` for a connection that serves ordinary commands instead of BullMQ's.
+check — with Redis down, each waits rather than failing. Pass `maxRetriesPerRequest: 3` for a
+connection that serves ordinary commands instead of BullMQ's. A `queue.add()` waits too, and a
+bound is not enough for it (below).
 
 A queue's first command also waits until its connection is ready, whatever the connection's retry
 options say. BullMQ's `skipWaitingForReady` does not help. On a connection with
 `enableOfflineQueue: false`, a queue built while the connection is still connecting fails its
 first add, and every add after it, even once Redis is up. We reproduced it with one backend's
 settings: an API that builds its queue on its first request loses that queue for as long as the
-process runs. So leave `skipWaitingForReady` off, and bound the `add()` of a queue built on first
-use, like the reads above.
+process runs. So leave `skipWaitingForReady` off.
+
+**A timer around `add()` ends the request, not the add.** A queue built at boot waits as well.
+With one on this connection, we stopped Redis for 35 seconds, and `add()` waited the whole time.
+A 2-second timer around it failed the request at 2 seconds, and the job was still added once
+Redis came back. So check the connection before you add:
+
+```ts
+if (redis.status !== "ready") throw errors.unavailable("Jobs are paused. Try again in a minute.");
+await queue.add("report", { userId });
+```
+
+While Redis is down, the connection reads `reconnecting`, and a job you never sent cannot turn up
+later. A Redis that hangs with the connection still open, such as a paused process, still reads
+`ready`, and `maxRetriesPerRequest` does not help there either. With `maxRetriesPerRequest: 1`,
+an `add()` to a stopped Redis failed in 0.3 seconds, but one to a paused Redis waited all 35
+seconds, then added the job. So keep a deadline on the request too, and give the job a `jobId`
+when a retry must not add it twice.
 
 **A URL with options after its `?` is refused.** ioredis lets those beat the options you pass,
 and reads each as a string: `?maxRetriesPerRequest=7` replaces the `null` BullMQ needs, and
@@ -748,7 +765,8 @@ await retryStalledFailures(reports);
   on that queue to log each record or tell a person. It asks BullMQ whether the job will run again,
   instead of counting attempts, so it also records a job that threw `UnrecoverableError` or
   stalled too often on its first attempt. Three of the five dead letters it replaces missed those.
-  In your shutdown, call `flush()` after the worker closes and before Redis does.
+  In your shutdown, call `flush()` after the worker closes and before Redis does. While Redis is
+  down, `worker.close()` never returns: see [Stopping for a deploy](#stopping-for-a-deploy).
 - **`retryStalledFailures` re-runs the jobs a deploy killed.** Two deploys during one long job use
   up its two retries. It only matches the reason BullMQ writes, so a job that failed with the word
   "stalled" in its own error stays failed. Never call it on a queue whose jobs must run at most
@@ -1517,6 +1535,19 @@ drainWith(
   knows the drain failed.
 - **`hardExitMs` bounds the whole drain.** When it runs out, the log names the step that hung and
   the process exits 1.
+- **`worker.close()` never returns while Redis is down.** It waits for Redis, and the drain waits
+  for it, so the steps after it never run and only `hardExitMs` ends the drain, with exit 1 and
+  the worker's step in the log. With Redis stopped, `close()` was still waiting after 40 seconds,
+  on an idle worker and on one running a job. `close(true)` returned in 2 milliseconds, but it
+  does not wait for a running job, which then runs again later like a job whose worker died.
+  Force it only when Redis is not there to finish the job anyway:
+
+  ```ts
+  { name: "worker", run: () => worker.close(redis.status !== "ready") },
+  ```
+
+  A paused Redis still reads `ready`, so there the backstop is still what ends the drain.
+
 - **`bunServerStep`** stops taking connections at once and gives the requests in flight `graceMs`
   to finish. An SSE stream never finishes on its own, so after that the step closes what is left.
 - **`nodeServerStep`** does the same for a `node:http` server, such as the one Express's
