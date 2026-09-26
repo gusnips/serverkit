@@ -87,9 +87,11 @@ export function cappedBackoff(attemptsMade: number, type?: string): number {
 
 /**
  * A worker with the settings a deploy must not break:
- * - A job whose worker died is re-run after 30 seconds, twice at most, before it fails. For a job
- *   that must never run twice, such as one that sends a mail, pass `maxStalledCount: 0` and give
- *   its jobs `attempts: 1`.
+ * - A job whose worker died is re-run twice at most before it fails, 15 to 90 seconds after the
+ *   worker died: a live worker checks every 30 seconds, and re-runs a job only on the check after
+ *   the one that marked it, once its 30-second lock has run out (measured 35 to 69 seconds after a
+ *   `kill -9`). For a job that must never run twice, such as one that sends a mail, pass
+ *   `maxStalledCount: 0` and give its jobs `attempts: 1`.
  * - Per-minute counts of completed and failed jobs are kept for two weeks, which is kilobytes.
  *   BullMQ keeps none by default, so `queue.getMetrics` has nothing to read.
  * - `JOB_RETENTION`, for jobs that did not set their own.

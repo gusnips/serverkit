@@ -735,8 +735,14 @@ await retryStalledFailures(reports);
   Redis grew to about 16 GB before anyone noticed. Completed jobs stay for a day, 200 at most.
   Failed ones stay for a week, 1,000 at most. The worker sets the same limits, so a job a script
   adds through a plain `new Queue` is deleted too.
-- **A job whose worker dies runs again after 30 seconds, twice at most.** For a job that must never
-  run twice, such as one that sends an email, pass `maxStalledCount: 0` and give its jobs
+- **A job whose worker dies runs again, twice at most, 15 to 90 seconds later.** The third time
+  its worker dies, the job fails. The wait comes from how BullMQ finds such a job. A live worker
+  checks every 30 seconds. Each check marks every running job, the worker running it clears the
+  mark when it renews the job's 30-second lock, and the next check re-runs a job that is still
+  marked and whose lock has run out. In 14 runs with `kill -9`, the job ran again 35 to 69
+  seconds later, and about 62 seconds later when the process manager restarted the only worker
+  at once. While no worker runs on the queue, nothing checks. For a job that must never run
+  twice, such as one that sends an email, pass `maxStalledCount: 0` and give its jobs
   `attempts: 1`.
 - **`wireDeadLetter` records every job that failed for good**, in a queue of its own. Run a worker
   on that queue to log each record or tell a person. It asks BullMQ whether the job will run again,
@@ -751,8 +757,11 @@ await retryStalledFailures(reports);
   because its worker kept dying, not because the job threw. BullMQ never runs your code again for
   that job, so if the job was driving a row, set the row's status here. "We lost the worker" is a
   different answer from "the job failed".
-- **`CAPPED_EXPONENTIAL`** retries after about 5, 10 and 20 seconds, and so on up to 120:
-  `backoff: { type: CAPPED_EXPONENTIAL }`.
+- **`CAPPED_EXPONENTIAL`** waits a random time before each retry, between half of a step and the
+  whole step. The step starts at 5 seconds and doubles up to 120, so the first retry comes 2.5 to
+  5 seconds after the failure, the second 5 to 10, then 10 to 20, 20 to 40, 40 to 80, and 60 to
+  120 from the sixth on. The random part keeps jobs that failed together from retrying together.
+  Ask for it per job: `{ attempts: 5, backoff: { type: CAPPED_EXPONENTIAL } }`.
 - **`removeLeftoverJob`** is for jobs you add under an id you chose. BullMQ skips the add, with no
   error, while a finished job with that id is still kept.
 
