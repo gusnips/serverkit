@@ -1,5 +1,15 @@
 export { liftContract, type LiftOptions } from "./contract.ts";
 export {
+  retrySource,
+  sdkMethods,
+  transportSource,
+  type InjectedMember,
+  type SdkMethods,
+  type SdkMethodsOptions,
+  type SdkOperation,
+  type SdkPlacement,
+} from "./methods.ts";
+export {
   camelCase,
   docComment,
   fieldsOf,
