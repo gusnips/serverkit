@@ -429,10 +429,14 @@ describe("send: the answer", () => {
     },
   );
 
-  it("hands over the error a 2xx carries beside its data", async () => {
-    const both = () => Response.json({ data: [], error: { code: "PARTIAL" } });
-    const failure = thrownFailure((await call(GET, [both])).outcome);
-    expect(failure).toMatchObject({ status: 200, error: { code: "PARTIAL" } });
+  // A 2xx is never the API refusing, so a code in its body is not handed on as one. Passed on,
+  // every SDK's error builder would throw NOT_FOUND with a 200 unless it guarded it itself.
+  it.each([
+    { error: { code: "NOT_FOUND", message: "No such place" } },
+    { data: [], error: { code: "PARTIAL" } },
+  ])("hands over no error code from a 2xx body such as %j, only its text", async (body) => {
+    const failure = thrownFailure((await call(GET, [() => Response.json(body)])).outcome);
+    expect(failure).toMatchObject({ status: 200, error: undefined, text: JSON.stringify(body) });
   });
 
   it("hands the error builder the envelope, the wait and the request id", async () => {

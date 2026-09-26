@@ -74,7 +74,10 @@ export interface Failure {
    * deadline, such as a stream the SDK opens itself and reads through `failureOf`, leaves it unset.
    */
   timeoutMs: number | undefined;
-  /** The envelope's `error`, when the answer carried one. */
+  /**
+   * The envelope's `error`, when a refusal carried one. Never set for a 2xx: a 2xx is not the API
+   * refusing, so a code in its body would name a refusal that did not happen. Its body is in `text`.
+   */
   error: EnvelopeError | undefined;
   /** An answer that was not the envelope, such as a gateway's HTML page: its first 500 characters. */
   text: string | undefined;
@@ -333,12 +336,14 @@ export function failureOf(
   response: Response,
   text: string,
 ): Failure {
-  const error = envelopeError(parse(text)?.["error"]);
+  // A 2xx lands here when its body is not the envelope, which is not the API answering, and so not
+  // the API refusing either. Its `error`, if it has one, would read as a real refusal to every SDK's
+  // error builder: a NOT_FOUND with a 200. Only the text goes on.
+  const error = response.ok ? undefined : envelopeError(parse(text)?.["error"]);
   return {
     method: call.method,
     path: call.path,
     timeoutMs: call.timeoutMs,
-    // A 2xx lands here when its body is not the envelope, which is not the API answering.
     status: response.status,
     timedOut: false,
     error,

@@ -201,7 +201,9 @@ export class Example extends GeneratedOperations {
 A call works when the API answers a 2xx with the envelope, a JSON object with `data` and no
 `error`, and the method returns that `data`. A 204 or a 205 works too, and returns `undefined`
 because it has no body. Any other 2xx, such as an empty body, `{}` or `{ "error": … }`, is a
-failure: your `error` gets it with the status and the text, and it is not tried again.
+failure: your `error` gets it with the status and the text, and it is not tried again. Its
+`failure.error` is always empty, even when the body has an `error` with a code. A 2xx is not the
+API refusing, so your SDK never throws a `NOT_FOUND` that came with a 200.
 
 `failure` has the status (0 when no answer came back), the API's `error`, the `Retry-After` wait,
 the request id, the answer's `headers`, and the idempotency key the call went out with. A call that
