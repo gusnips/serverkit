@@ -1237,12 +1237,11 @@ app.route("/", mcpRoutes("/mcp", buildMcpServer, { allowedOrigins: new Set() }))
 ```
 
 An operation is `{ name, description, inputSchema, run(deps, args) }`, plus an optional `title`
-and `annotations`. That is not the shape `buildOpenApi` takes (below). It reads `input`, `summary`
-and an optional `description`, and builds its `x-mcp-tools` list from those, so a list written for
-one door does not fit the other. To serve both from one list, give each entry both sets: `input`
-and `inputSchema` set to the same schema, a `title` that repeats `summary`, and a `description`.
-Then skip the `restOnly` entries in your `registerOperation` loop, and register each `name` once,
-as the reference lists it: the SDK throws on a name it already has.
+and `annotations`. Pass the same list to `buildOpenApi` as `mcpTools` (below), and the reference
+lists exactly the tools you register, with their own arguments, in your order. A tool that takes
+more than its REST route needs this. A tool call has no headers, so a key that makes a retry safe
+travels as an argument, such as `idempotencyKey`. A card built from the route's `input` leaves that
+argument out, and its `additionalProperties: false` tells a model the key would be refused.
 
 - **A tool call answers what the REST route answers.** A success is `{ data }`, as one text block.
   A failure is the same `{ error }` body your `errorResponse` gives REST, marked `isError`. Pass
@@ -1374,8 +1373,10 @@ app.get("/openapi.json", (c) => reference(c.req.query("lang")));
   JSON cannot carry, such as a `Date`, is written as `{}` instead of failing the whole reference.
   A schema that refers to itself throws, because inside the document its `$ref` would point at the
   wrong thing.
-- **`mcpTools: true`** also lists each operation that is not `restOnly` under `x-mcp-tools`, once
-  per name, so your docs render both doors from one fetch.
+- **`mcpTools`** also lists your MCP tools under `x-mcp-tools`, so your docs render both doors from
+  one fetch. Pass the tools you give `registerOperation`: each card is one of those tools, in your
+  order, with its `annotations`. `true` lists each operation that is not `restOnly` instead, once
+  per name. That is right only when every tool takes exactly its operation's `input`.
 
 To serve other languages, pass one function per language. It gets each English string and returns
 the translation:

@@ -165,8 +165,26 @@ export interface OpenApiOptions {
    * success names it as optional. Absent, the success names only `data`.
    */
   meta?: SchemaSource;
-  /** Also list each operation that is not `restOnly` under `x-mcp-tools`, once per name. */
-  mcpTools?: boolean;
+  /**
+   * Also list your MCP tools under `x-mcp-tools`. Pass the tools you register, and the cards are
+   * those tools, in that order. `true` lists each operation that is not `restOnly` instead, once
+   * per name, which is right only when every tool takes exactly its operation's `input`: two
+   * backends' tools take an idempotency key as an argument, and a card built from the operation
+   * left it out, while its `additionalProperties: false` told a model the key would be refused.
+   */
+  mcpTools?: boolean | readonly McpToolSource[];
+}
+
+/**
+ * A tool as you register it on your MCP server. `ToolOperation` from `@gusnips/server/mcp` fits as
+ * it is, so the reference and `tools/list` can read one list.
+ */
+export interface McpToolSource {
+  name: string;
+  title?: string;
+  description: string;
+  inputSchema: SchemaSource;
+  annotations?: JsonObject;
 }
 
 /** One tool, as the docs render it beside the REST reference. */
@@ -175,6 +193,8 @@ export interface McpToolCard {
   title: string;
   description: string;
   inputSchema: JsonObject;
+  /** The tool's hints, such as `readOnlyHint`, when you pass the tools you register. */
+  annotations?: JsonObject;
 }
 
 export interface OpenApiDocument {
@@ -346,7 +366,7 @@ export function buildOpenApi(
       ...op.extensions,
     };
 
-    if (options.mcpTools && !op.restOnly && !toolNames.has(op.name)) {
+    if (options.mcpTools === true && !op.restOnly && !toolNames.has(op.name)) {
       toolNames.add(op.name);
       tools.push({
         name: op.name,
@@ -367,7 +387,21 @@ export function buildOpenApi(
       schemas: { ApiError: apiError(options.errorCodes) },
       securitySchemes: { ...options.securitySchemes },
     },
-    ...(options.mcpTools && { "x-mcp-tools": tools }),
+    ...(options.mcpTools && {
+      "x-mcp-tools": options.mcpTools === true ? tools : options.mcpTools.map(toolCard),
+    }),
+  };
+}
+
+/** A registered tool as its card, its schema converted the way an operation's `input` is. */
+function toolCard(tool: McpToolSource): McpToolCard {
+  return {
+    name: tool.name,
+    // What an MCP client shows when a tool has no title.
+    title: tool.title ?? tool.name,
+    description: tool.description,
+    inputSchema: jsonSchemaOf(tool.inputSchema, "input", `The tool ${tool.name}`),
+    ...(tool.annotations !== undefined && { annotations: { ...tool.annotations } }),
   };
 }
 

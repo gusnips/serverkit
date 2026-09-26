@@ -1,9 +1,11 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, expectTypeOf, it } from "vitest";
 import { z } from "zod";
+import type { ToolOperation } from "../mcp/index.ts";
 import {
   buildOpenApi,
   createOpenApiResponder,
   translateProse,
+  type McpToolSource,
   type OpenApiOperation,
   type OpenApiOptions,
 } from "./index.ts";
@@ -267,6 +269,41 @@ describe("buildOpenApi", () => {
       required: ["id", "method"],
     });
     expect(buildOpenApi([pair], options)).not.toHaveProperty("x-mcp-tools");
+  });
+
+  it("lists the tools you register as they are: their own arguments, order and hints", () => {
+    const tools: McpToolSource[] = [
+      {
+        name: "list_numbers",
+        description: "Lists them.",
+        inputSchema: z.object({ limit: z.number() }).strict(),
+        annotations: { readOnlyHint: true },
+      },
+      {
+        name: "pair_number",
+        title: "Pair a number",
+        description: "Pairs it.",
+        // The key the REST route reads from a header, as a tool call carries it.
+        inputSchema: z.object({ id: z.string(), idempotencyKey: z.string().optional() }).strict(),
+      },
+    ];
+    const cards = buildOpenApi([pair, list], { ...options, mcpTools: tools })["x-mcp-tools"];
+    expect(cards?.map((card) => [card.name, card.title])).toEqual([
+      ["list_numbers", "list_numbers"],
+      ["pair_number", "Pair a number"],
+    ]);
+    expect(cards?.[0]?.annotations).toEqual({ readOnlyHint: true });
+    expect(cards?.[1]).not.toHaveProperty("annotations");
+    expect(cards?.[1]?.inputSchema).toMatchObject({
+      properties: { id: { type: "string" }, idempotencyKey: { type: "string" } },
+      additionalProperties: false,
+    });
+    expect(Object.keys(cards?.[1]?.inputSchema["properties"] ?? {})).toEqual([
+      "id",
+      "idempotencyKey",
+    ]);
+    // The objects `registerOperation` takes are the list, with no mapping in between.
+    expectTypeOf<ToolOperation<unknown, unknown, unknown>>().toExtend<McpToolSource>();
   });
 
   it("refuses an operation id that repeats, naming both routes", () => {
