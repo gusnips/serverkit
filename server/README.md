@@ -950,7 +950,10 @@ It answers with a result, not a throw, so the 400 is in your words. The reasons 
 - **`ports: [80, 443]`** is the smaller blast radius when nothing needs more. DNS can move a
   host; it cannot move a port.
 - **`allowLoopback: true`** lets `localhost`, 127.0.0.0/8 and `::1` through for a test, and
-  nothing else. Never a private range, never the metadata service.
+  nothing else. Never a private range, never the metadata service. It leaves the scheme alone,
+  so a receiver on your machine that speaks plain HTTP also needs `schemes: ["http:", "https:"]`.
+  Without it, `http://localhost:4000/` is refused as `scheme`. `fetchPublic` takes the same
+  options as `policy`.
 
 Twelve backends wrote this check. The most-copied version let carrier-grade NAT through, and
 another judged `::ffff:127.0.0.1` safe once the URL parser had rewritten it as `::ffff:7f00:1`.

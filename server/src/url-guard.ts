@@ -50,7 +50,8 @@ export interface UrlPolicy {
   /**
    * Let `localhost`, 127.0.0.0/8 and `::1` through, for a test or a laptop. Nothing else: never a
    * private range, never the metadata service. A flag that skipped the whole guard existed in two
-   * donors, switched on by an environment variable nothing refused in production.
+   * donors, switched on by an environment variable nothing refused in production. It leaves the
+   * scheme alone, so a receiver at `http://localhost:4000/` also needs `schemes: ["http:", "https:"]`.
    */
   allowLoopback?: boolean;
 }
