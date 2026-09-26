@@ -884,6 +884,10 @@ app.use(
   because the connection `createRedis` makes by default waits for Redis to come back, and so did
   every request behind them. `timeoutMs` is required as the backstop. The connection above fails
   in a few milliseconds, so the backstop never runs.
+- **A count sent while that connection is still opening waits for it.** The connection refuses
+  any command before it is ready, so without the wait the first count after every boot failed.
+  It waits for `ready` or `close`, inside `timeoutMs`, so a Redis that is down still fails at
+  once.
 - One MULTI counts the request and re-arms the key's expiry, so no key outlives its window. Keys
   start with `rl:`; pass `prefix` to change that.
 

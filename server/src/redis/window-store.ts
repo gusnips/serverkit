@@ -7,6 +7,15 @@ export interface WindowPipeline {
   exec(): Promise<[error: Error | null, result: unknown][] | null>;
 }
 
+/** The client, as far as this needs it. An `IORedis` fits as it is; a stub needs only `multi`. */
+export interface WindowRedis {
+  multi(): WindowPipeline;
+  /** ioredis's connection state. A client without one is treated as always connected. */
+  status?: string;
+  once?(event: "ready" | "close", listener: () => void): unknown;
+  removeListener?(event: "ready" | "close", listener: () => void): unknown;
+}
+
 export interface RedisWindowStoreOptions {
   /**
    * How long a count may take before it is a store failure, which the limiter then allows or
@@ -43,9 +52,18 @@ export interface RedisWindowStoreOptions {
  *       commandTimeout: 1_000,
  *       onError: (error) => logger.error("[redis] limiter connection", { error }),
  *     });
+ *
+ * **That connection refuses a command while it is still opening, so a count waits for it.**
+ * Without the offline queue, ioredis answers "Stream isn't writeable" to anything sent before the
+ * first `ready`, so the first count after every boot failed, and after every reconnect too. A
+ * proxy that holds requests through a restart delivers the first one into exactly that window: an
+ * allowing limiter let it through uncounted, and a refusing one answered 503. So a count sent while
+ * the connection is opening waits for `ready` or `close`, whichever comes first, inside the same
+ * `timeoutMs`. Ending on `close` is what keeps "fails at once": with Redis down, the attempt closes
+ * in about a millisecond and the count fails then, instead of at the deadline.
  */
 export function redisWindowStore(
-  redis: { multi(): WindowPipeline },
+  redis: WindowRedis,
   { timeoutMs, prefix = "rl:" }: RedisWindowStoreOptions,
 ): WindowStore {
   return {
@@ -53,7 +71,19 @@ export function redisWindowStore(
     async hit(key, resetAt, now) {
       const name = prefix + key;
       let timer: ReturnType<typeof setTimeout> | undefined;
+      let stopWaiting: (() => void) | undefined;
       try {
+        const deadline = new Promise<never>((_, reject) => {
+          timer = setTimeout(
+            () => reject(new Error(`Redis did not count the request within ${timeoutMs} ms.`)),
+            timeoutMs,
+          );
+        });
+        if (redis.status === "connecting" || redis.status === "connect") {
+          const wait = whenOpened(redis);
+          stopWaiting = wait.stop;
+          await Promise.race([wait.opened, deadline]);
+        }
         const replies = await Promise.race([
           redis
             .multi()
@@ -62,12 +92,7 @@ export function redisWindowStore(
             // closes still finds its key.
             .pexpire(name, Math.ceil(resetAt - now) + 1_000)
             .exec(),
-          new Promise<never>((_, reject) => {
-            timer = setTimeout(
-              () => reject(new Error(`Redis did not count the request within ${timeoutMs} ms.`)),
-              timeoutMs,
-            );
-          }),
+          deadline,
         ]);
         const [error, count] = replies?.[0] ?? [null, undefined];
         if (error) throw error;
@@ -76,7 +101,25 @@ export function redisWindowStore(
         return count;
       } finally {
         clearTimeout(timer);
+        stopWaiting?.();
       }
+    },
+  };
+}
+
+/** Settles on the connection's first `ready` or `close`, and says how to stop listening. */
+function whenOpened(redis: WindowRedis): { opened: Promise<void>; stop: () => void } {
+  let done = (): void => {};
+  const opened = new Promise<void>((resolve) => {
+    done = resolve;
+  });
+  redis.once?.("ready", done);
+  redis.once?.("close", done);
+  return {
+    opened,
+    stop: () => {
+      redis.removeListener?.("ready", done);
+      redis.removeListener?.("close", done);
     },
   };
 }

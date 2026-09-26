@@ -77,6 +77,8 @@ describe("redisWindowStore", () => {
       onError: () => {},
     });
     try {
+      // Still opening, so this also proves the wait for `ready` ends on `close`.
+      expect(redis.status).toBe("connecting");
       const started = Date.now();
       const hit = await hitWindow(redisWindowStore(redis, { timeoutMs: 5_000 }), "k", rule);
       expect(hit).toMatchObject({ outcome: "store-failed" });
@@ -120,6 +122,26 @@ describe.skipIf(!hasRedisServer)("redisWindowStore against a real Redis", () => 
     } finally {
       a.disconnect();
       b.disconnect();
+    }
+  });
+
+  // A proxy holding requests through a restart delivers the first one before `ready`. Without the
+  // offline queue ioredis refused it ("Stream isn't writeable"), so the first count after every
+  // boot failed: let through uncounted, or answered 503.
+  it("counts a request sent while the recommended connection is still opening", async () => {
+    const redis = createRedis({
+      url,
+      maxRetriesPerRequest: 1,
+      enableOfflineQueue: false,
+      commandTimeout: 1_000,
+      onError: () => {},
+    });
+    try {
+      expect(redis.status).toBe("connecting");
+      const hit = await hitWindow(redisWindowStore(redis, { timeoutMs: 1_000 }), "boot", rule);
+      expect(hit).toMatchObject({ outcome: "allowed", count: 1 });
+    } finally {
+      redis.disconnect();
     }
   });
 });
