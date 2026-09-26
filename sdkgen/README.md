@@ -199,8 +199,18 @@ export class Example extends GeneratedOperations {
 | `mintKeys`                | false     | Makes up an idempotency key for a call that takes one, so it can try again. |
 
 `failure` has the status (0 when no answer came back), the API's `error`, the `Retry-After` wait,
-the request id, and the idempotency key the call went out with. A call that may have run can be
-sent again with that key, and the API answers from the first run.
+the request id, the answer's `headers`, and the idempotency key the call went out with. A call that
+may have run can be sent again with that key, and the API answers from the first run.
+
+A request your SDK sends itself, such as a stream it opens with its own `fetch`, gets the same
+`failure` from `failureOf`. Read the body first, because a body can be read only once:
+
+```ts
+if (!response.ok) {
+  const text = await response.text();
+  throw new ExampleError(failureOf({ method: "GET", path, timeoutMs }, response, text));
+}
+```
 
 A failed call is tried again:
 

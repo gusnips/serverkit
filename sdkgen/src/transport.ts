@@ -78,6 +78,8 @@ export interface Failure {
   retryAfterSecs: number | undefined;
   /** The `x-request-id` header, for the API's support to find the call. */
   requestId: string | undefined;
+  /** The answer's headers, for one your API adds to a refusal, such as what the call cost. */
+  headers: Headers | undefined;
   /** The key the call was sent with. Retry with it, and a call that ran answers from its first run. */
   idempotencyKey: string | undefined;
   /** What fetch threw, when no answer came back. */
@@ -279,6 +281,7 @@ async function once<T, M>(
         text: undefined,
         retryAfterSecs: undefined,
         requestId: undefined,
+        headers: undefined,
         cause,
       },
     };
@@ -289,20 +292,36 @@ async function once<T, M>(
     // The one place the SDK takes the API's word for a type: the contract says what `data` is.
     return { ok: true, answer: { data: body["data"] as T, meta: body["meta"] as M | undefined } };
   }
-  const error = envelopeError(body?.["error"]);
+  // ponytail: parses the body a second time, on a failure only, so a stream's refusal and a
+  // call's are read by one function.
+  return { ok: false, failure: failureOf(base, response, text) };
+}
+
+/**
+ * The failure an answer describes, for a request the SDK sent itself, such as a stream it opens
+ * with its own `fetch`. Read the body first and pass its text: a body can be read only once.
+ * `send` reads its own answers through this too, so both come out the same.
+ */
+export function failureOf(
+  call: Pick<Failure, "method" | "path" | "timeoutMs">,
+  response: Response,
+  text: string,
+): Failure {
+  const error = envelopeError(parse(text)?.["error"]);
   return {
-    ok: false,
-    failure: {
-      ...base,
-      // A 2xx lands here only when its body is not JSON, which is not the API answering.
-      status: response.status,
-      timedOut: false,
-      error,
-      text: error === undefined && text !== "" ? text.slice(0, 500) : undefined,
-      retryAfterSecs: parseRetryAfter(response.headers.get("retry-after")),
-      requestId: response.headers.get("x-request-id") ?? undefined,
-      cause: undefined,
-    },
+    method: call.method,
+    path: call.path,
+    timeoutMs: call.timeoutMs,
+    // A 2xx lands here only when its body is not JSON, which is not the API answering.
+    status: response.status,
+    timedOut: false,
+    error,
+    text: error === undefined && text !== "" ? text.slice(0, 500) : undefined,
+    retryAfterSecs: parseRetryAfter(response.headers.get("retry-after")),
+    requestId: response.headers.get("x-request-id") ?? undefined,
+    headers: response.headers,
+    idempotencyKey: undefined,
+    cause: undefined,
   };
 }
 

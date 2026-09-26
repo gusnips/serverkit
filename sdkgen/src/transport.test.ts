@@ -6,6 +6,7 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  failureOf,
   send,
   type Failure,
   type RequestOptions,
@@ -122,7 +123,7 @@ async function call(
   return { calls, outcome };
 }
 
-function failureOf(outcome: Outcome): Failure {
+function thrownFailure(outcome: Outcome): Failure {
   if (outcome.ok || !(outcome.error instanceof SdkError)) {
     throw new Error(`expected an SdkError, got ${JSON.stringify(outcome)}`);
   }
@@ -272,7 +273,7 @@ describe("send: the idempotency key", () => {
       transport: { mintKeys: true },
     });
     expect(calls[0]!.headers.get("idempotency-key")).toBe("k-1");
-    expect(failureOf(outcome).idempotencyKey).toBe("k-1");
+    expect(thrownFailure(outcome).idempotencyKey).toBe("k-1");
   });
 
   it("sends no key on a call that takes none, even when minting", async () => {
@@ -353,16 +354,16 @@ describe("send: the request", () => {
     const timeoutMs = vi.fn(() => 5000);
     const hooked = await call(WRITE, [offline], { params: { a: 1 }, transport: { timeoutMs } });
     expect(timeoutMs).toHaveBeenCalledWith(WRITE, { a: 1 });
-    expect(failureOf(hooked.outcome).timeoutMs).toBe(5000);
+    expect(thrownFailure(hooked.outcome).timeoutMs).toBe(5000);
 
     const own = await call(WRITE, [offline], {
       opts: { timeoutMs: 700 },
       transport: { timeoutMs },
     });
-    expect(failureOf(own.outcome).timeoutMs).toBe(700);
+    expect(thrownFailure(own.outcome).timeoutMs).toBe(700);
 
     const fallback = await call(WRITE, [offline]);
-    expect(failureOf(fallback.outcome).timeoutMs).toBe(30_000);
+    expect(thrownFailure(fallback.outcome).timeoutMs).toBe(30_000);
   });
 });
 
@@ -385,7 +386,7 @@ describe("send: the answer", () => {
       details: { limit: 5 },
       headers: { "retry-after": "60", "x-request-id": "req_1" },
     });
-    const failure = failureOf((await call(WRITE, [reply])).outcome);
+    const failure = thrownFailure((await call(WRITE, [reply])).outcome);
     expect(failure).toMatchObject({
       method: "POST",
       path: "/things",
@@ -400,7 +401,7 @@ describe("send: the answer", () => {
 
   it("keeps the text of an answer that is not the envelope, a 2xx included", async () => {
     const html = () => new Response("<html>Bad gateway</html>", { status: 502 });
-    const gateway = failureOf((await call(WRITE, [html])).outcome);
+    const gateway = thrownFailure((await call(WRITE, [html])).outcome);
     expect(gateway).toMatchObject({
       status: 502,
       error: undefined,
@@ -408,17 +409,45 @@ describe("send: the answer", () => {
     });
 
     const notJson = () => new Response("<html>Welcome</html>", { status: 200 });
-    const portal = failureOf((await call(GET, [notJson])).outcome);
+    const portal = thrownFailure((await call(GET, [notJson])).outcome);
     expect(portal).toMatchObject({ status: 200, text: "<html>Welcome</html>" });
+  });
+
+  it("hands over the answer's headers, and none when no answer came back", async () => {
+    const reply = refuse(422, {
+      code: "BLOCKED",
+      headers: { "x-request-cost": "0", "x-credits-remaining": "988" },
+    });
+    const failure = thrownFailure((await call(WRITE, [reply])).outcome);
+    expect(failure.headers?.get("x-request-cost")).toBe("0");
+    expect(failure.headers?.get("x-credits-remaining")).toBe("988");
+    expect(thrownFailure((await call(WRITE, [offline])).outcome).headers).toBeUndefined();
+  });
+
+  it("reads a refusal the SDK fetched itself the way it reads its own", async () => {
+    const reply = refuse(429, {
+      code: "RATE_LIMITED",
+      details: { retryAfterSecs: null },
+      headers: { "retry-after": "60", "x-request-id": "req_1" },
+    });
+    const sent = thrownFailure((await call(GET, [reply])).outcome);
+    const response = reply();
+    const read = failureOf(
+      { method: "GET", path: "/things", timeoutMs: 30_000 },
+      response,
+      await response.text(),
+    );
+    expect(read).toEqual({ ...sent, headers: expect.any(Headers) });
+    expect(read.headers?.get("x-request-id")).toBe("req_1");
   });
 
   it("reports no answer as status 0, and says when it was the timeout", async () => {
     const timeout: Reply = () => {
       throw new DOMException("The operation timed out.", "TimeoutError");
     };
-    const failure = failureOf((await call(WRITE, [timeout])).outcome);
+    const failure = thrownFailure((await call(WRITE, [timeout])).outcome);
     expect(failure).toMatchObject({ status: 0, timedOut: true });
-    expect(failureOf((await call(WRITE, [offline])).outcome)).toMatchObject({
+    expect(thrownFailure((await call(WRITE, [offline])).outcome)).toMatchObject({
       status: 0,
       timedOut: false,
     });
@@ -476,6 +505,6 @@ describe("send: the caller's signal", () => {
       throw new DOMException("The operation timed out.", "TimeoutError");
     };
     const { outcome } = await call(WRITE, [timeout], { opts: { signal: controller.signal } });
-    expect(failureOf(outcome)).toMatchObject({ status: 0, timedOut: true });
+    expect(thrownFailure(outcome)).toMatchObject({ status: 0, timedOut: true });
   });
 });
