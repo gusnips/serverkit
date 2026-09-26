@@ -33,7 +33,7 @@
     },
     "sdkgen": {
       "name": "@gusnips/sdkgen",
-      "version": "0.2.0",
+      "version": "0.2.1",
       "dependencies": {
         "@gusnips/http": "^0.1.5",
       },
@@ -50,7 +50,7 @@
     },
     "server": {
       "name": "@gusnips/server",
-      "version": "0.8.24",
+      "version": "0.8.25",
       "devDependencies": {
         "@gusnips/http": ">=0.1.1 <1",
         "@modelcontextprotocol/sdk": "^1.30.1",
