@@ -33,7 +33,7 @@
     },
     "sdkgen": {
       "name": "@gusnips/sdkgen",
-      "version": "0.2.6",
+      "version": "0.2.7",
       "dependencies": {
         "@gusnips/http": "^0.1.5",
       },
