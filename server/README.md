@@ -1363,6 +1363,12 @@ app.get("/openapi.json", (c) => reference(c.req.query("lang")));
   every success, as optional.
 - **A `status: 204` success has no body**, the same as `noContent` sends. Leave out `response`
   and `example` on it: with either one, the build throws.
+- **`sdk` names the operation's method in a generated SDK**:
+  `sdk: { method: "numbers.pair", returns: "PairResult" }`. The reference writes it as `x-sdk`, and
+  `@gusnips/sdkgen` reads it from this same list. The build throws on a name with more than one
+  dot, on a name two operations share, and on a status with no body that returns anything but
+  `"void"`. Add `repeatable: true` when running the call twice does no harm, such as a write the
+  server dedupes itself, and the SDK tries it again after a failure.
 - **Schemas are zod 4.4 or later, any other Standard JSON Schema, or plain JSON Schema.** A type
   JSON cannot carry, such as a `Date`, is written as `{}` instead of failing the whole reference.
   A schema that refers to itself throws, because inside the document its `$ref` would point at the

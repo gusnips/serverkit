@@ -401,6 +401,85 @@ describe("the envelope", () => {
   });
 });
 
+describe("the SDK place", () => {
+  const placed: OpenApiOperation = {
+    ...pair,
+    sdk: { method: "numbers.pair", returns: "PairDto" },
+  };
+
+  it("writes an operation's SDK place as x-sdk, keeps it as data, and writes none where it has none", () => {
+    const search: OpenApiOperation = {
+      ...pair,
+      name: "search",
+      path: "/search",
+      sdk: { method: "search", returns: "NumberDto[]", repeatable: true },
+    };
+    const doc = buildOpenApi([placed, search, list], options);
+    expect(op(doc, "/numbers/{id}/pair", "post")["x-sdk"]).toEqual({
+      method: "numbers.pair",
+      returns: "PairDto",
+    });
+    expect(op(doc, "/search", "post")["x-sdk"]).toEqual({
+      method: "search",
+      returns: "NumberDto[]",
+      repeatable: true,
+    });
+    expect(op(doc, "/numbers", "get")).not.toHaveProperty("x-sdk");
+    const translated = translateProse(doc, (text) => text.toUpperCase());
+    expect(op(translated, "/numbers/{id}/pair", "post")["x-sdk"]).toEqual({
+      method: "numbers.pair",
+      returns: "PairDto",
+    });
+  });
+
+  it("takes void from an operation with no body", () => {
+    const clear: OpenApiOperation = {
+      ...list,
+      method: "delete",
+      status: 204,
+      sdk: { method: "numbers.clear", returns: "void" },
+    };
+    expect(() => buildOpenApi([clear], options)).not.toThrow();
+  });
+
+  it.each<[string, OpenApiOperation[], RegExp]>([
+    [
+      "a method with two dots",
+      [{ ...pair, sdk: { method: "a.b.c", returns: "PairDto" } }],
+      /the SDK method "a\.b\.c" is not a name/,
+    ],
+    [
+      "a method that is not a name",
+      [{ ...pair, sdk: { method: "numbers.check-in", returns: "PairDto" } }],
+      /the SDK method "numbers\.check-in" is not a name/,
+    ],
+    [
+      "two operations with one method, naming both routes",
+      [placed, { ...list, sdk: { method: "numbers.pair", returns: "NumberDto" } }],
+      /GET \/numbers and POST \/numbers\/:id\{\[0-9\]\+\}\/pair both want the SDK method "numbers\.pair"/,
+    ],
+    ...[204, 205, 304].map((status): [string, OpenApiOperation[], RegExp] => [
+      `a ${status} whose method returns something`,
+      [
+        {
+          ...list,
+          method: "delete",
+          status,
+          sdk: { method: "numbers.clear", returns: "NumberDto" },
+        },
+      ],
+      new RegExp(`answers ${status}, which has no body, so its SDK method returns "void"`),
+    ]),
+    [
+      "an x-sdk extension beside an sdk",
+      [{ ...placed, extensions: { "x-sdk": { method: "other" } } }],
+      /sets `x-sdk` in `extensions` and has an `sdk`/,
+    ],
+  ])("refuses %s", (_label, operations, message) => {
+    expect(() => buildOpenApi(operations, options)).toThrow(message);
+  });
+});
+
 describe("translateProse", () => {
   const upper = (text: string) => text.toUpperCase();
 

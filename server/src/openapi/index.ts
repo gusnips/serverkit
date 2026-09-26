@@ -98,6 +98,28 @@ export interface OpenApiOperation {
    * written in every language unless `proseExtensions` names them.
    */
   extensions?: Record<`x-${string}`, unknown>;
+  /**
+   * Where a generated SDK puts this operation, for `@gusnips/sdkgen` to read from this same list.
+   * The reference carries it as `x-sdk`. Absent: the SDK has no method for it.
+   */
+  sdk?: OpenApiSdk;
+}
+
+/** Where a generated SDK puts an operation. */
+export interface OpenApiSdk {
+  /** `sendMessage`, or `numbers.pair` in a namespace. One dot at most, and unique. */
+  method: string;
+  /**
+   * What `data` holds, as the SDK names it: `MessageDto`, `NumberDto[]`. `void` for a status with
+   * no body, such as a 204.
+   */
+  returns: string;
+  /**
+   * Safe to run twice with no key: a read sent as a POST, or a write the server dedupes on its
+   * own. Default: a GET only. A write that reads an `Idempotency-Key` needs no flag: a call that
+   * sends one is safe to repeat.
+   */
+  repeatable?: boolean;
 }
 
 /** A request header an operation reads. */
@@ -214,6 +236,9 @@ const RETRY_AFTER = {
  */
 const NO_BODY = new Set([204, 205, 304]);
 
+/** `name`, or `namespace.name`: what a generated SDK can put on a client as it is. */
+const SDK_METHOD = /^[A-Za-z_$][\w$]*(\.[A-Za-z_$][\w$]*)?$/;
+
 const ERROR_CONTENT = {
   "application/json": { schema: { $ref: "#/components/schemas/ApiError" } },
 };
@@ -230,6 +255,7 @@ export function buildOpenApi(
   const schemeNames = Object.keys(options.securitySchemes);
   const paths: OpenApiDocument["paths"] = {};
   const idsSeenAt = new Map<string, string>();
+  const sdkMethodsAt = new Map<string, string>();
   const tools: McpToolCard[] = [];
   const toolNames = new Set<string>();
   const meta =
@@ -278,6 +304,7 @@ export function buildOpenApi(
           "`example`. Remove them, or answer 200.",
       );
     }
+    if (op.sdk !== undefined) checkSdk(op, op.sdk, where, hasBody, sdkMethodsAt);
     const responses: JsonObject = {
       [String(status)]: {
         description: op.summary,
@@ -315,6 +342,7 @@ export function buildOpenApi(
       ...inputParts(op, input, slots, headers),
       security: op.keyless ? [] : schemeNames.map((name) => ({ [name]: [] })),
       responses,
+      ...(op.sdk !== undefined && { "x-sdk": { ...op.sdk } }),
       ...op.extensions,
     };
 
@@ -341,6 +369,46 @@ export function buildOpenApi(
     },
     ...(options.mcpTools && { "x-mcp-tools": tools }),
   };
+}
+
+/**
+ * The checks a generated SDK would otherwise fail later, in someone's editor: a method name a client
+ * can carry, one operation per name, and `void` where the answer has no body. An operation mounted
+ * on several paths names its method on one of them.
+ */
+function checkSdk(
+  op: OpenApiOperation,
+  sdk: OpenApiSdk,
+  where: string,
+  hasBody: boolean,
+  seenAt: Map<string, string>,
+): void {
+  if (!SDK_METHOD.test(sdk.method)) {
+    throw new Error(
+      `${where}: the SDK method "${sdk.method}" is not a name. Write \`name\`, or ` +
+        "`namespace.name` with one dot.",
+    );
+  }
+  const first = seenAt.get(sdk.method);
+  if (first !== undefined) {
+    throw new Error(
+      `${where} and ${first} both want the SDK method "${sdk.method}". Rename one, or, for one ` +
+        "operation mounted on several paths, give only one of them an `sdk`.",
+    );
+  }
+  seenAt.set(sdk.method, where);
+  if (!hasBody && sdk.returns !== "void") {
+    throw new Error(
+      `${where} answers ${op.status}, which has no body, so its SDK method returns "void", not ` +
+        `${sdk.returns}.`,
+    );
+  }
+  if (op.extensions !== undefined && "x-sdk" in op.extensions) {
+    throw new Error(
+      `${where} sets \`x-sdk\` in \`extensions\` and has an \`sdk\`. Keep the \`sdk\`: it is ` +
+        "what the reference writes as `x-sdk`.",
+    );
+  }
 }
 
 /**

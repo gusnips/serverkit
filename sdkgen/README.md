@@ -113,6 +113,8 @@ const { members } = sdkMethods([
 The operations are the same list you hand `buildOpenApi` from `@gusnips/server`, so you write them
 once. `sdk.method` is a name like `sendMessage`, or `numbers.pair` to put the method in a `numbers`
 group. `sdk.returns` is the type `data` holds: `MessageDto`, `NumberDto[]`, or `void` for a 204.
+From `@gusnips/server` 0.8.24, `buildOpenApi` checks the `sdk` field and writes it into the
+reference as `x-sdk`.
 
 Each method calls `this.request(spec, params, opts)`. Your class declares it and sends the call
 through the transport, below. `sdkMethods` also returns:

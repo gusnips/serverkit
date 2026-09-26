@@ -929,6 +929,12 @@ Unhandled error event:", ...)` and returns — it never emits, so Node's throw i
     A guide built on the kit found it. A status that carries no body (204, 205, 304) is now
     documented with none, and one handed a `response` or an `example` throws.
 
+    **An operation's SDK place is checked where the list is built.** A generated SDK that does not
+    compile fails in somebody's editor, far from the operation that caused it. So the builder
+    refuses a method name with more than one dot, one name on two operations, and a return type on
+    a status with no body, and names the routes in the message. It writes the place as `x-sdk`,
+    which one adopter already did by hand under a name of its own.
+
     **`default` is two different words in one document.** Under a schema it is data, and the
     translation walk must not touch it. Under `responses` it is the answer to any other status, and
     its description is prose. The first walk skipped the key everywhere, so the catch-all response
