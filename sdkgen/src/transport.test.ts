@@ -441,6 +441,17 @@ describe("send: the answer", () => {
     expect(read.headers?.get("x-request-id")).toBe("req_1");
   });
 
+  it("reads a refusal to a request that had no deadline, such as a stream", async () => {
+    const response = refuse(403, { code: "FORBIDDEN" })();
+    const read = failureOf(
+      { method: "GET", path: "/jobs/j_1/stream" },
+      response,
+      await response.text(),
+    );
+    expect(read).toMatchObject({ status: 403, timedOut: false, error: { code: "FORBIDDEN" } });
+    expect(read.timeoutMs).toBeUndefined();
+  });
+
   it("reports no answer as status 0, and says when it was the timeout", async () => {
     const timeout: Reply = () => {
       throw new DOMException("The operation timed out.", "TimeoutError");

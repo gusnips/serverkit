@@ -208,9 +208,12 @@ A request your SDK sends itself, such as a stream it opens with its own `fetch`,
 ```ts
 if (!response.ok) {
   const text = await response.text();
-  throw new ExampleError(failureOf({ method: "GET", path, timeoutMs }, response, text));
+  throw new ExampleError(failureOf({ method: "GET", path }, response, text));
 }
 ```
+
+Pass `timeoutMs` too if that request had a deadline. A stream usually has none, and then
+`failure.timeoutMs` is unset. It is always set when `failure.timedOut` is true.
 
 A failed call is tried again:
 

@@ -69,7 +69,11 @@ export interface Failure {
   status: number;
   /** No answer within `timeoutMs`. The call may still have run. */
   timedOut: boolean;
-  timeoutMs: number;
+  /**
+   * How long the call could wait for an answer. Always set when `timedOut` is. A request with no
+   * deadline, such as a stream the SDK opens itself and reads through `failureOf`, leaves it unset.
+   */
+  timeoutMs: number | undefined;
   /** The envelope's `error`, when the answer carried one. */
   error: EnvelopeError | undefined;
   /** An answer that was not the envelope, such as a gateway's HTML page: its first 500 characters. */
@@ -300,10 +304,11 @@ async function once<T, M>(
 /**
  * The failure an answer describes, for a request the SDK sent itself, such as a stream it opens
  * with its own `fetch`. Read the body first and pass its text: a body can be read only once.
- * `send` reads its own answers through this too, so both come out the same.
+ * `send` reads its own answers through this too, so both come out the same. An answer never timed
+ * out, so `timeoutMs` is only a record of the deadline; leave it out when the request had none.
  */
 export function failureOf(
-  call: Pick<Failure, "method" | "path" | "timeoutMs">,
+  call: Pick<Failure, "method" | "path"> & { timeoutMs?: number },
   response: Response,
   text: string,
 ): Failure {
