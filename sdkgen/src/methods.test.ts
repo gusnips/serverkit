@@ -260,6 +260,12 @@ export interface DeleteNumberParams {
       /answers 204, which has no body, so `sdk\.returns` must be "void"/,
     ],
     [
+      "a 205 that returns something, as the reference refuses it",
+      [{ ...DELETE_NUMBER, status: 205, sdk: { method: "numbers.delete", returns: "NumberDto" } }],
+      {},
+      /answers 205, which has no body, so `sdk\.returns` must be "void"/,
+    ],
+    [
       "a namespace the list does not have",
       [GET_NUMBER],
       { namespaces: ["jobs"] },

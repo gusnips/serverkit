@@ -133,8 +133,8 @@ Four options:
   ones and must not take one of their names.
 
 It stops with an error that names the operation when a method name has more than one dot, two
-methods want one name, a 204 returns something, or a path slot is filled by a field the caller may
-leave out.
+methods want one name, a status with no body (204, 205, 304) returns something, or a path slot is
+filled by a field the caller may leave out.
 
 ## Send the calls
 

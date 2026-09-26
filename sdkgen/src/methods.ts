@@ -59,7 +59,7 @@ export interface SdkOperation {
   fixed?: readonly string[];
   /** Request headers the operation reads. An `Idempotency-Key` here makes the call keyed. */
   headers?: readonly { readonly name: string }[];
-  /** The success status. A 204 must return `void`. */
+  /** The success status. A 204, 205 or 304 has no body, so it returns `void`. */
   status?: number;
   extensions?: Readonly<Record<`x-${string}`, unknown>>;
   /** Where the generated SDK puts this operation. Absent: no method. */
@@ -109,6 +109,9 @@ export interface SdkMethods {
   returnTypes: string[];
 }
 
+/** Success statuses with no body (RFC 9110), the same three the server's reference documents so. */
+const NO_BODY = new Set([204, 205, 304]);
+
 /** Class members a method must not be named: the seam every method calls, and the constructor. */
 const RESERVED = new Set(["request", "constructor"]);
 
@@ -152,9 +155,9 @@ export function sdkMethods(
     const sdk = op.sdk;
     if (sdk === undefined) continue;
     const where = `${op.method.toUpperCase()} ${op.path} (${op.name})`;
-    if (op.status === 204 && sdk.returns !== "void") {
+    if (op.status !== undefined && NO_BODY.has(op.status) && sdk.returns !== "void") {
       throw new Error(
-        `${where} answers 204, which has no body, so \`sdk.returns\` must be "void".`,
+        `${where} answers ${op.status}, which has no body, so \`sdk.returns\` must be "void".`,
       );
     }
     const schema = op.input === undefined ? undefined : schemaOf(op.input, where);
