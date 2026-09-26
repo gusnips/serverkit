@@ -59,7 +59,9 @@ export function createQueue<T>(
   const { connection, onError, prefix, defaultJobOptions } = options;
   const queue = new Queue<T>(name, {
     connection,
-    prefix,
+    // Only when set: BullMQ fills its default with `Object.assign`, so an undefined key beats it
+    // and a job's `prefix` and the client names read "undefined".
+    ...(prefix !== undefined && { prefix }),
     defaultJobOptions: { ...JOB_RETENTION, ...defaultJobOptions },
   });
   queue.on("error", onError);
@@ -113,7 +115,7 @@ export function createWorker<T>(
     ...rest,
     settings: { backoffStrategy: cappedBackoff, ...rest.settings },
     connection,
-    prefix,
+    ...(prefix !== undefined && { prefix }),
   });
   worker.on("error", onError);
   return worker;

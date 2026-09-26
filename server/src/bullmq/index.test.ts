@@ -448,6 +448,19 @@ describe.skipIf(!hasRedisServer)("against a real Redis", () => {
     });
   });
 
+  // BullMQ fills its default with `Object.assign({ prefix: "bull" }, opts)`, so a `prefix` key
+  // that is present but undefined wins. The keys survive, because they default again further in,
+  // but a job's `prefix` and each connection's client name read `undefined`.
+  it("leaves BullMQ's own prefix in place when none is given", async () => {
+    const { connection, onError } = on();
+    const queue = track(createQueue("unprefixed", { connection, onError }));
+    const worker = track(
+      createWorker("unprefixed", async () => undefined, { connection, onError, autorun: false }),
+    );
+    expect(queue.opts.prefix).toBe("bull");
+    expect(worker.opts.prefix).toBe("bull");
+  });
+
   // The README's snippet. Kept here, beside the Redis it needs.
   it("README — background jobs", async () => {
     const prefix = on().prefix;
