@@ -1299,6 +1299,8 @@ app.get("/openapi.json", (c) => reference(c.req.query("lang")));
   on someone else.
 - **`meta` sits beside `data`** when you say what it holds: `meta: PageMetaSchema` names it on
   every success, as optional.
+- **A `status: 204` success has no body**, the same as `noContent` sends. Leave out `response`
+  and `example` on it: with either one, the build throws.
 - **Schemas are zod 4.4 or later, any other Standard JSON Schema, or plain JSON Schema.** A type
   JSON cannot carry, such as a `Date`, is written as `{}` instead of failing the whole reference.
   A schema that refers to itself throws, because inside the document its `$ref` would point at the
@@ -1589,7 +1591,8 @@ Each of these was measured, not assumed.
 - A mail login is never sent over a connection without TLS.
 - An MCP tool handler never throws, and a tool's `.shape` does not compile.
 - An API reference names the origin you configure, never the one a request came in on. A
-  repeated operation id, a tag you did not list, or a schema that refers to itself throws.
+  repeated operation id, a tag you did not list, a schema that refers to itself, or a body on a
+  204 throws.
 - A webhook delivery never retries a 4xx or a redirect, and never comes back sooner than
   `Retry-After` asks, up to an hour.
 - An idempotency key reused for a different request is refused, never replayed, and a failed save

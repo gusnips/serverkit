@@ -69,7 +69,11 @@ type Op = Record<string, unknown> & {
   >;
 };
 
-function op(doc: ReturnType<typeof buildOpenApi>, path: string, method: "get" | "post"): Op {
+function op(
+  doc: ReturnType<typeof buildOpenApi>,
+  path: string,
+  method: "get" | "post" | "delete",
+): Op {
   const found = doc.paths[path]?.[method];
   if (found === undefined) throw new Error(`no ${method} ${path}`);
   // Test-only: the document types operations as JSON objects, and these tests read their parts.
@@ -341,6 +345,25 @@ describe("the envelope", () => {
     expect(withMeta.required).toEqual(["data"]);
     expect(withMeta.properties["meta"]).toEqual(total);
     expect(success(buildOpenApi([pair], options)).properties).not.toHaveProperty("meta");
+  });
+
+  it("gives a 204 no body, the way noContent answers it, and refuses one it was handed", () => {
+    const remove: OpenApiOperation = {
+      name: "remove_number",
+      method: "delete",
+      path: "/numbers/:id",
+      tag: "Numbers",
+      summary: "Remove a number",
+      status: 204,
+    };
+    const doc = buildOpenApi([remove], { ...options, meta: { type: "object" } });
+    expect(op(doc, "/numbers/{id}", "delete").responses["204"]).toEqual({
+      description: "Remove a number",
+    });
+    expect(() => buildOpenApi([{ ...remove, response: z.object({}) }], options)).toThrow(
+      /DELETE \/numbers\/:id answers 204, which has no body/,
+    );
+    expect(() => buildOpenApi([{ ...remove, example: {} }], options)).toThrow(/no body/);
   });
 
   it("adds an operation's own refusals to the shared ones, and only on that operation", () => {

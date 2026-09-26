@@ -75,7 +75,10 @@ export interface OpenApiOperation {
   headers?: readonly OpenApiHeader[];
   /** What `data` holds when the call works. Absent, the document says only that it is there. */
   response?: SchemaSource;
-  /** The success status. 200 by default. */
+  /**
+   * The success status. 200 by default. A 204 is documented with no body, as `noContent` sends
+   * it, so it takes no `response` or `example`.
+   */
   status?: number;
   /**
    * Refusals only this operation answers, beside the shared `errors`: `{ 504: "…" }` on the
@@ -205,6 +208,12 @@ const RETRY_AFTER = {
   schema: { type: "integer", minimum: 0 },
 };
 
+/**
+ * Success statuses whose answer has no body (RFC 9110). `noContent` answers 204 with none, and the
+ * reference once documented that same operation with a `{ data }` body.
+ */
+const NO_BODY = new Set([204, 205, 304]);
+
 const ERROR_CONTENT = {
   "application/json": { schema: { $ref: "#/components/schemas/ApiError" } },
 };
@@ -261,22 +270,32 @@ export function buildOpenApi(
           ? { type: "string" }
           : jsonSchemaOf(header.schema, "input", `${where} header ${header.name}`),
     }));
+    const status = op.status ?? 200;
+    const hasBody = !NO_BODY.has(status);
+    if (!hasBody && (op.response !== undefined || op.example !== undefined)) {
+      throw new Error(
+        `${where} answers ${status}, which has no body, so it cannot have a \`response\` or an ` +
+          "`example`. Remove them, or answer 200.",
+      );
+    }
     const responses: JsonObject = {
-      [String(op.status ?? 200)]: {
+      [String(status)]: {
         description: op.summary,
-        content: {
-          "application/json": {
-            schema: {
-              type: "object",
-              required: ["data"],
-              properties: {
-                data: op.response === undefined ? {} : jsonSchemaOf(op.response, "output", where),
-                ...(meta !== undefined && { meta }),
+        ...(hasBody && {
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                required: ["data"],
+                properties: {
+                  data: op.response === undefined ? {} : jsonSchemaOf(op.response, "output", where),
+                  ...(meta !== undefined && { meta }),
+                },
               },
+              ...(op.example !== undefined && { example: { data: op.example } }),
             },
-            ...(op.example !== undefined && { example: { data: op.example } }),
           },
-        },
+        }),
       },
     };
     for (const [status, description] of Object.entries({ ...options.errors, ...op.errors })) {

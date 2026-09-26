@@ -907,6 +907,12 @@ Unhandled error event:", ...)` and returns — it never emits, so Node's throw i
     operation on POST and PUT of one path. That is the guard working. The adopter keeps its own id
     rule by passing `operationId`.
 
+    **A 204 has no body, and the kit contradicted itself there.** `noContent` answers 204 with no
+    body and no `content-type`, and the builder gave an operation with `status: 204` the same
+    `{ data }` body as any other success, so the reference promised a body the route never sends.
+    A guide built on the kit found it. A status that carries no body (204, 205, 304) is now
+    documented with none, and one handed a `response` or an `example` throws.
+
     **`default` is two different words in one document.** Under a schema it is data, and the
     translation walk must not touch it. Under `responses` it is the answer to any other status, and
     its description is prose. The first walk skipped the key everywhere, so the catch-all response
