@@ -913,8 +913,8 @@ app.use(
   `"allow"` for a limit that guards a promise, like a plan's requests per minute: refusing every
   paying caller over a Redis blip trades a real outage for a limit nobody was hitting. Pass your
   503 for one that guards a bill or a stranger's inbox, like a keyless demo or a form that sends
-  mail: `whenStoreFails: () => errors.unavailable("…")`. Either way the failure is written to
-  `logger`, with the scope and never the subject.
+  mail: `whenStoreFails: () => errors.unavailable("…")`. Either way `rateLimit` writes the
+  failure to `logger`, with the scope and never the subject. `hitWindow`, below, writes nothing.
 - **Give it its own connection.** Three limiters in the fleet said "fails open" and hung instead,
   because the connection `createRedis` makes by default waits for Redis to come back, and so did
   every request behind them. `timeoutMs` is required as the backstop. The connection above fails
@@ -928,6 +928,9 @@ app.use(
 
 `hitWindow(store, key, { limit, windowMs })` is the same count without Hono, for a Worker, a job
 or an MCP tool. It answers `{ outcome, allowed, retryAfterSecs, … }` and never throws for a limit.
+With a store that can fail, it also takes `whenStoreFails`, and it logs nothing: a failed store
+comes back as `outcome: "store-failed"`, and the log line is yours to write. The MCP door below
+shows it.
 
 ## A URL somebody else gave you
 
@@ -1222,13 +1225,23 @@ function buildMcpServer(c: Context<AppEnv>) {
   return server;
 }
 
-app.use("/mcp/*", requireApiKey);
+// The key check is yours. The kit ships none, because where your keys live is up to you.
+app.use("/mcp/*", async (c, next) => {
+  const account = await accountForKey(c.req.header("authorization")); // your own lookup
+  if (!account) throw errors.invalidKey();
+  c.set("userId", account.userId);
+  await next();
+});
 app.route("/", mcpRoutes("/mcp", buildMcpServer, { allowedOrigins: new Set() }));
 ```
 
 An operation is `{ name, description, inputSchema, run(deps, args) }`, plus an optional `title`
-and `annotations`. If your REST routes already run operations of that shape, the same list serves
-both doors.
+and `annotations`. That is not the shape `buildOpenApi` takes (below). It reads `input`, `summary`
+and an optional `description`, and builds its `x-mcp-tools` list from those, so a list written for
+one door does not fit the other. To serve both from one list, give each entry both sets: `input`
+and `inputSchema` set to the same schema, a `title` that repeats `summary`, and a `description`.
+Then skip the `restOnly` entries in your `registerOperation` loop, and register each `name` once,
+as the reference lists it: the SDK throws on a name it already has.
 
 - **A tool call answers what the REST route answers.** A success is `{ data }`, as one text block.
   A failure is the same `{ error }` body your `errorResponse` gives REST, marked `isError`. Pass
@@ -1246,6 +1259,25 @@ both doors.
   and the SDK runs every one of them. A limit on the route counts the POST, so 50 calls cost one.
   `beforeCall` runs before each call. Throw your 429 there and only that call is refused. It is
   required, so a door with no limit says `null`.
+- **With a Redis store, you write the log line.** `hitWindow` logs nothing. When the store does
+  not answer, it returns `outcome: "store-failed"`, and a limit that has quietly stopped limiting
+  is the failure you want to see:
+
+  ```ts
+  const toolLimits = redisWindowStore(limitsRedis, { timeoutMs: 500 });
+
+  // in beforeCall:
+  const hit = await hitWindow(toolLimits, userId, {
+    limit: 60,
+    windowMs: 60_000,
+    whenStoreFails: "allow",
+  });
+  if (hit.outcome === "store-failed") {
+    logger.warn("[mcp] the limit store did not answer", { allowed: hit.allowed, error: hit.error });
+    if (!hit.allowed) throw errors.unavailable("…"); // with whenStoreFails: "refuse"
+  } else if (!hit.allowed) throw errors.rateLimit(hit.retryAfterSecs);
+  ```
+
 - **Pass the zod object, made `.strict()`, not its `.shape`.** Given a shape, the SDK builds a loose
   object and quietly drops an argument the agent made up. Given the strict object, it refuses the
   call and names the key. A `.shape` does not compile here.

@@ -145,7 +145,7 @@ function refuse(c: Context, status: ContentfulStatusCode, message: string, heade
  * The door itself: `path` and `path/`, POST only, with no sessions. `build` makes a fresh server
  * for each request, because a stateless transport serves one request, and it is closed after.
  *
- *     app.use("/mcp/*", requireApiKey);
+ *     app.use("/mcp/*", checkApiKey); // yours: the kit ships no API key check
  *     app.route("/", mcpRoutes("/mcp", buildServer, { allowedOrigins: new Set([APP_ORIGIN]) }));
  *
  * Mount it at the root, as above: mounted at `path`, Hono folds both spellings into one. And guard

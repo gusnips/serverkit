@@ -56,7 +56,12 @@ import { createPgPool, pingPool } from "./pg/index.ts";
 import { createRedis, redisWindowStore } from "./redis/index.ts";
 
 type ErrorCode =
-  "VALIDATION_ERROR" | "UNAUTHORIZED" | "NOT_FOUND" | "RATE_LIMIT_EXCEEDED" | "INTERNAL_ERROR";
+  | "VALIDATION_ERROR"
+  | "UNAUTHORIZED"
+  | "NOT_FOUND"
+  | "RATE_LIMIT_EXCEEDED"
+  | "INTERNAL_ERROR"
+  | "SERVICE_UNAVAILABLE";
 type MessageKey = "serverErrors.notFound";
 
 const ERROR_STATUS = {
@@ -65,6 +70,7 @@ const ERROR_STATUS = {
   NOT_FOUND: 404,
   RATE_LIMIT_EXCEEDED: 429,
   INTERNAL_ERROR: 500,
+  SERVICE_UNAVAILABLE: 503,
 } as const satisfies Record<ErrorCode, number>;
 
 const appError = createAppError<typeof ERROR_STATUS, MessageKey>(ERROR_STATUS);
@@ -73,6 +79,8 @@ const errors = {
   notFound: (what = "Resource") => appError("NOT_FOUND", `${what} not found`),
   rateLimit: (retryAfterSecs: number) =>
     appError("RATE_LIMIT_EXCEEDED", "Too many requests", { retryAfterSecs }),
+  invalidKey: () => appError("UNAUTHORIZED", "The API key is missing or wrong"),
+  unavailable: (message: string) => appError("SERVICE_UNAVAILABLE", message),
 };
 
 const errorResponse = createErrorResponse<ErrorCode, MessageKey>({
@@ -420,7 +428,7 @@ describe("README — a link that proves who it is for", () => {
 
 describe("README — an MCP door", () => {
   it("answers every operation, counts each call in a batch, and guards both spellings", async () => {
-    type AppEnv = { Variables: { userId: string; requestId: string } };
+    type AppEnv = { Variables: RequestVariables<ErrorCode> & { userId: string } };
     type Deps = { userId: string };
     const getPlace: ToolOperation<Deps, { id: string }, { id: string; owner: string }> = {
       name: "get_place",
@@ -437,13 +445,17 @@ describe("README — an MCP door", () => {
     };
     const OPERATIONS = [getPlace, findPlaces];
     const logger = createLogger();
-    const requireApiKey = createMiddleware<AppEnv>(async (c, next) => {
-      if (c.req.header("authorization") !== "Bearer key_1") return c.json({ error: "no key" }, 401);
-      c.set("userId", "u_1");
-      c.set("requestId", "req_1");
-      return next();
-    });
+    const accountForKey = async (header: string | undefined) =>
+      header === "Bearer key_1" ? { userId: "u_1" } : null;
     const app = new Hono<AppEnv>();
+    // What `requestLogger` sets, so the door's log lines carry the request's id.
+    app.use(
+      createMiddleware<AppEnv>(async (c, next) => {
+        c.set("requestId", "req_1");
+        await next();
+      }),
+    );
+    app.onError(errorHandler({ errorResponse, logger }));
 
     // The README, from here.
     const toolCalls = memoryWindowStore();
@@ -467,7 +479,13 @@ describe("README — an MCP door", () => {
       return server;
     }
 
-    app.use("/mcp/*", requireApiKey);
+    // The key check is yours. The kit ships none, because where your keys live is up to you.
+    app.use("/mcp/*", async (c, next) => {
+      const account = await accountForKey(c.req.header("authorization")); // your own lookup
+      if (!account) throw errors.invalidKey();
+      c.set("userId", account.userId);
+      await next();
+    });
     app.route("/", mcpRoutes("/mcp", buildMcpServer, { allowedOrigins: new Set() }));
     // To here.
 
@@ -508,6 +526,47 @@ describe("README — an MCP door", () => {
 
     for (const path of ["/mcp", "/mcp/"])
       expect((await post(path, call(99, "find_places", { q: "x" }), "wrong")).status).toBe(401);
+  });
+
+  it("leaves the store failure's log line to you, and the snippet writes it", async () => {
+    const lines: string[] = [];
+    const logger = createLogger({ write: (line) => lines.push(line) });
+    // A Redis nobody runs, on the settings the rate-limit section prints.
+    const limitsRedis = createRedis({
+      url: "redis://127.0.0.1:1",
+      maxRetriesPerRequest: 1,
+      enableOfflineQueue: false,
+      commandTimeout: 1_000,
+      onError: () => {},
+    });
+    const userId = "u_1";
+
+    // The README, from here.
+    const toolLimits = redisWindowStore(limitsRedis, { timeoutMs: 500 });
+
+    // in beforeCall:
+    const hit = await hitWindow(toolLimits, userId, {
+      limit: 60,
+      windowMs: 60_000,
+      whenStoreFails: "allow",
+    });
+    if (hit.outcome === "store-failed") {
+      logger.warn("[mcp] the limit store did not answer", {
+        allowed: hit.allowed,
+        error: hit.error,
+      });
+      if (!hit.allowed) throw errors.unavailable("…"); // with whenStoreFails: "refuse"
+    } else if (!hit.allowed) throw errors.rateLimit(hit.retryAfterSecs);
+    // To here.
+
+    limitsRedis.disconnect();
+    expect(hit).toMatchObject({ outcome: "store-failed", allowed: true });
+    expect(lines).toHaveLength(1);
+    expect(JSON.parse(String(lines[0]))).toMatchObject({
+      level: "warn",
+      message: "[mcp] the limit store did not answer",
+      allowed: true,
+    });
   });
 });
 
