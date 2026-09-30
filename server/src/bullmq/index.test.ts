@@ -1,5 +1,5 @@
 import { once } from "node:events";
-import { Queue, UnrecoverableError, type Job } from "bullmq";
+import { FlowProducer, Queue, UnrecoverableError, type Job } from "bullmq";
 import type IORedis from "ioredis";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { hasRedisServer, startRedisServer } from "../__tests__/redis-server.ts";
@@ -412,6 +412,62 @@ describe.skipIf(!hasRedisServer)("against a real Redis", () => {
       await removeLeftoverJob(waiting);
       expect(await (await queue.getJob("refetch-7"))?.getState()).toBe("delayed");
       await removeLeftoverJob(undefined);
+    });
+
+    it("leaves a job a worker took after it read the state, instead of throwing", async () => {
+      const at = on();
+      const queue = track(createQueue("q", at));
+      let release = () => {};
+      const worker = track(
+        createWorker("q", () => new Promise<void>((resolve) => (release = () => resolve())), at),
+      );
+      const taken = once(worker, "active");
+      const job = await queue.add("refetch", {}, { jobId: "refetch-9" });
+      await taken;
+      // Another caller removed the finished job and re-added it, and a worker took it, all after
+      // this read. BullMQ then refuses the remove, because the worker holds the job's lock.
+      vi.spyOn(job, "getState").mockResolvedValueOnce("completed");
+      try {
+        await expect(removeLeftoverJob(job)).resolves.toBeUndefined();
+        expect(await job.getState()).toBe("active");
+      } finally {
+        release();
+      }
+    });
+
+    it("still throws when the job it could not remove stays finished", async () => {
+      const at = on();
+      const flows = track(new FlowProducer({ connection: redis, prefix: at.prefix }));
+      let release: (() => void) | undefined;
+      track(
+        createWorker(
+          "q",
+          async (job) => {
+            if (job.name === "fails") throw new UnrecoverableError("the account is gone");
+            if (job.name === "runs") await new Promise<void>((resolve) => (release = resolve));
+          },
+          { ...at, concurrency: 2 },
+        ),
+      );
+      // A parent fails with its first child while the second one runs. BullMQ refuses to remove
+      // it with the same "locked" error as above, and the parent keeps its id, so the add after
+      // this would be skipped. Matching the error's text would have hidden that.
+      const { job: parent } = await flows.add({
+        name: "report",
+        queueName: "q",
+        opts: { jobId: "report-1" },
+        children: [
+          { name: "runs", queueName: "q" },
+          { name: "fails", queueName: "q", opts: { failParentOnFailure: true } },
+        ],
+      });
+      await eventually(async () => release !== undefined && (await parent.getState()) === "failed");
+      try {
+        await expect(removeLeftoverJob(parent)).rejects.toThrow("locked by another worker");
+        expect(await parent.getState()).toBe("failed");
+      } finally {
+        release?.();
+      }
     });
   });
 

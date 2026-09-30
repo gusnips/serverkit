@@ -791,7 +791,8 @@ await retryStalledFailures(reports);
   120 from the sixth on. The random part keeps jobs that failed together from retrying together.
   Ask for it per job: `{ attempts: 5, backoff: { type: CAPPED_EXPONENTIAL } }`.
 - **`removeLeftoverJob`** is for jobs you add under an id you chose. BullMQ skips the add, with no
-  error, while a finished job with that id is still kept.
+  error, while a finished job with that id is still kept. If the job starts running again while it
+  works, it leaves the job alone instead of throwing, so two callers can race on one id.
 
 Recurring jobs come from one table, synced on every boot:
 

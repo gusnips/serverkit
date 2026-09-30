@@ -147,9 +147,24 @@ const LIVE_JOB_STATES = new Set([
  *
  *     await removeLeftoverJob(await queue.getJob(`refetch-${id}`));
  *     await queue.add("refetch", { id }, { jobId: `refetch-${id}` });
+ *
+ * A job that goes live again between the state read and the remove is left alone, not thrown:
+ * another caller removed and re-added it, and a worker took it, so BullMQ refuses the remove. The
+ * enqueue this guards must not fail there, because the `add` after it is right to do nothing while
+ * the job runs. A remove that fails on a job still finished is thrown, since that `add` would be
+ * skipped.
  */
 export async function removeLeftoverJob(job: Job | undefined): Promise<void> {
-  if (job && !LIVE_JOB_STATES.has(await job.getState())) await job.remove();
+  if (!job || LIVE_JOB_STATES.has(await job.getState())) return;
+  try {
+    await job.remove();
+  } catch (error) {
+    // Ask Redis where the job is rather than read BullMQ's error text, which is not an API. BullMQ
+    // also sends that text for a failed parent whose other child still runs, and the parent stays
+    // finished.
+    if (LIVE_JOB_STATES.has(await job.getState())) return;
+    throw error;
+  }
 }
 
 /** What the dead letter keeps about a job that failed for good: enough to find it and re-add it. */
