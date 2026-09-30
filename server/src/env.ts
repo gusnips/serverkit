@@ -16,6 +16,8 @@
  *   variable switched the whole check off.
  */
 
+import { originOf } from "./origin.ts";
+
 export interface EnvSpec<Source extends object> {
   /** Must be set. A value of only spaces counts as not set. */
   required?: readonly string[];
@@ -35,6 +37,13 @@ export interface EnvSpec<Source extends object> {
    * its secret whether or not the rest of its integration is configured.
    */
   secrets?: Readonly<Record<string, number>>;
+  /**
+   * Keys that hold origins, one or a comma-separated list: `APP_URL`, `CORS_EXTRA_ORIGINS`. When
+   * one is set, each entry must be an origin as `corsAllowList` reads it, a scheme and a host with
+   * no path after them. The allow-list throws at its first bad entry, and it is often built as a
+   * module loads, before this check has run; listed here, every bad entry is in the same error.
+   */
+  origins?: readonly string[];
   /** Your own rules, returned as more lines for the same list. Keep values out of them. */
   check?: (source: Source) => readonly string[];
   /** The error's last line, such as "Copy .env.example to .env and fill it in." */
@@ -121,6 +130,21 @@ export function envProblems<Source extends object>(
           `full, or make one with \`openssl rand -base64 ${bytes}\`.`,
       );
     }
+  }
+
+  for (const key of spec.origins ?? []) {
+    const entries = textOf(key)
+      .split(",")
+      .map((entry) => entry.trim())
+      .filter(Boolean);
+    entries.forEach((entry, index) => {
+      if (originOf(entry) !== null) return;
+      const which = entries.length === 1 ? key : `${key} entry ${index + 1}`;
+      problems.push(
+        `${which} is not an origin. Write only the scheme and the host, such as ` +
+          `https://app.example.com, with no path after them.`,
+      );
+    });
   }
 
   problems.push(...(spec.check?.(source) ?? []));

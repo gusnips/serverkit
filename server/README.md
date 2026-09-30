@@ -1547,6 +1547,10 @@ Copy apps/api/.env.example to apps/api/.env and fill it in.
   placeholder still in `SMTP_PASS`, and the boot stops. That is on purpose: the spec knows which
   keys go together, not which code reads them, and a webhook route mounted either way still
   verifies with its secret. Delete the line of an integration you do not run.
+- **`origins`** names keys that hold origins, one or a comma-separated list, such as `APP_URL` and
+  `CORS_EXTRA_ORIGINS`. Each entry must be what `corsAllowList` takes: a scheme and a host, with
+  no path after them. The allow-list throws at its first bad entry, often while a module loads and
+  before this check has run. Here every bad one is listed, by key and entry number.
 - **`check`** adds your own rules to the same list. Return a line per problem, with no value in it.
 - In a Worker, pass its `env`. `envProblems` returns the same list without throwing, for a test.
 

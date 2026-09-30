@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { EnvError, envProblems, validateEnv } from "./env.ts";
+import { corsAllowList } from "./hono/headers.ts";
 
 const RANDOM = "q7Vb1xN0c2Lk9sQe4Rz8Wm3Jp6Yt5Uh+AaBbCcDdEe="; // `openssl rand -base64 32`
 
@@ -184,6 +185,52 @@ describe("envProblems", () => {
       "These are not set: DATABASE_URL",
       "STRIPE_SECRET_KEY must be a test key while billing is in beta",
     ]);
+  });
+
+  it("lists every origin that is not one, by key and entry, and never quotes it", () => {
+    const shape =
+      "is not an origin. Write only the scheme and the host, such as https://app.example.com, " +
+      "with no path after them.";
+    expect(
+      envProblems(
+        {
+          APP_URL: "https://app.example.com/login",
+          SITE_URL: "https://example.com/",
+          CORS_EXTRA_ORIGINS: "https://a.example.com, file:///tmp, ,https://b.example.com?x=1",
+        },
+        { origins: ["APP_URL", "SITE_URL", "API_URL", "CORS_EXTRA_ORIGINS"] },
+      ),
+    ).toEqual([
+      `APP_URL ${shape}`,
+      `CORS_EXTRA_ORIGINS entry 2 ${shape}`,
+      `CORS_EXTRA_ORIGINS entry 3 ${shape}`,
+    ]);
+  });
+
+  it("passes an origin exactly when corsAllowList takes it", () => {
+    // The env check exists to say what the allow-list would throw on, all at once and before it
+    // is built. If the two ever answer differently, a box passes the check and still stops.
+    const entries = [
+      "https://app.example.com",
+      "https://App.example.com/",
+      "http://localhost:5173",
+      "https://app.example.com/login",
+      "https://app.example.com?next=/",
+      "https://app.example.com/#top",
+      "file:///tmp",
+      "app.example.com",
+      "not a url",
+    ];
+    for (const entry of entries) {
+      const listed = envProblems({ ORIGIN: entry }, { origins: ["ORIGIN"] }).length === 0;
+      let taken = true;
+      try {
+        corsAllowList([entry]);
+      } catch {
+        taken = false;
+      }
+      expect({ entry, listed }).toEqual({ entry, listed: taken });
+    }
   });
 
   it("takes a Worker's env, where a binding is set and a key is not on Object's prototype", () => {

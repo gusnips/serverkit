@@ -1,6 +1,7 @@
 import type { MiddlewareHandler } from "hono";
 import { cors } from "hono/cors";
 import { secureHeaders } from "hono/secure-headers";
+import { originOf } from "../origin.ts";
 
 type SecureHeadersOptions = NonNullable<Parameters<typeof secureHeaders>[0]>;
 
@@ -74,7 +75,7 @@ export function corsAllowList(
   options: CorsAllowListOptions = {},
 ): MiddlewareHandler & { has(origin: string): boolean } {
   const allowed = new Set<string>();
-  for (const entry of origins) if (entry.trim()) allowed.add(originOf(entry.trim()));
+  for (const entry of origins) if (entry.trim()) allowed.add(allowedOrigin(entry.trim()));
   if (allowed.size === 0)
     throw new TypeError(
       "corsAllowList has no origins, so no page in a browser could call this API. Pass the " +
@@ -97,18 +98,11 @@ export function corsAllowList(
   return Object.assign(middleware, { has: (origin: string) => allowed.has(origin) });
 }
 
-function originOf(entry: string): string {
-  let url: URL | null = null;
-  try {
-    url = new URL(entry);
-  } catch {
-    // Reported below, with the same sentence.
-  }
-  // An entry such as `file:///` has an opaque origin, which is the string "null", and allowing
-  // "null" allows every sandboxed iframe and every page opened from a file.
-  if (!url || url.origin === "null" || url.pathname !== "/" || url.search || url.hash)
+function allowedOrigin(entry: string): string {
+  const origin = originOf(entry);
+  if (origin === null)
     throw new TypeError(
       `corsAllowList takes origins, such as "https://app.example.com", and "${entry}" is not one`,
     );
-  return url.origin;
+  return origin;
 }
