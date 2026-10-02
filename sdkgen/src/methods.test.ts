@@ -358,7 +358,7 @@ export interface DeleteNumberParams {
 describe("retrySource and transportSource", () => {
   it("copies @gusnips/http's retry rule whole, with nothing to import", () => {
     const source = retrySource();
-    for (const name of ["shouldRetry", "retryDelayMs", "retryAfterSecs", "parseRetryAfter"]) {
+    for (const name of ["isRetryable", "retryDelayMs", "retryAfterSecs", "parseRetryAfter"]) {
       expect(source).toContain(`export function ${name}(`);
     }
     expect(source).not.toMatch(/^import /m);

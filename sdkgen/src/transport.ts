@@ -18,7 +18,7 @@
  * - **The header is read first, in both its forms.** Two copies read the body's wait before the
  *   `Retry-After` header, and read the header only as seconds, so an HTTP date was no wait at all.
  */
-import { parseRetryAfter, retryDelayMs, shouldRetry } from "@gusnips/http/retry";
+import { parseRetryAfter, retryDelayMs, isRetryable } from "@gusnips/http/retry";
 
 /** What a generated method tells the transport about its operation. */
 export interface RequestSpec {
@@ -187,7 +187,7 @@ export async function send<T = unknown, M = unknown>(
     };
     const again =
       attempt < maxRetries &&
-      shouldRetry(answer, { repeatable, durableCodes: transport.durableCodes });
+      isRetryable(answer, { repeatable, durableCodes: transport.durableCodes });
     if (!again) throw transport.error(failure);
     await sleep(retryDelayMs(attempt, answer), signal);
   }

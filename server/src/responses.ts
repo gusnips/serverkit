@@ -10,7 +10,7 @@
  * API next door masks exactly that. A `Context`-shaped function would serve one of those four
  * callers. The framework adapter is eight lines and lives in `/hono`.
  */
-import type { ApiError, ApiSuccess, PaginationMeta, ValidationIssue } from "@gusnips/http";
+import type { ApiErrorBody, ApiSuccess, PaginationMeta, ValidationIssue } from "@gusnips/http";
 import { AppError } from "./errors.ts";
 
 /**
@@ -61,7 +61,7 @@ export interface ErrorAnswer<Code extends string = string, Key extends string = 
    * — a stream frame, a failed job's record — without a cast. The wire type stays `string`,
    * because a client cannot check a key it was sent; the server that raised it can.
    */
-  body: ApiError<Code> & { error: { messageKey?: Key } };
+  body: ApiErrorBody<Code> & { error: { messageKey?: Key } };
   /** `Retry-After` when the refusal states a wait; `WWW-Authenticate` on a 401. */
   headers: Record<string, string>;
   /**

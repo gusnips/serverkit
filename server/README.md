@@ -29,7 +29,7 @@ Every 2xx body is `{ data }`. Every refusal is `{ error: { code, message, messag
 details? } }`. That is the envelope `@gusnips/http` declares and a browser client parses, so the
 two ends of one request never disagree about the shape.
 
-**Import `ApiError`, `ApiSuccess` and `PaginationMeta` from `@gusnips/http`, not from here.**
+**Import `ApiErrorBody`, `ApiSuccess` and `PaginationMeta` from `@gusnips/http`, not from here.**
 This package does not re-export them, on purpose: two names for one type is how a version skew
 becomes invisible. You already have the import — the contract is the package your client reads
 it from too.
