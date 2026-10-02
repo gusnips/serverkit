@@ -117,7 +117,7 @@ failed, the run refused, or the input was wrong.
 A held file prints one line, for a workflow to turn into a warning:
 
 ```
-[MIGRATIONS] MANUAL_PENDING 013_drop_trade_in.sql — drops three columns with customer data
+[MIGRATIONS] MANUAL_PENDING 013_drop_trade_in.sql: drops three columns with customer data
 ```
 
 ```bash

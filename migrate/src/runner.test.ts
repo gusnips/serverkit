@@ -260,7 +260,7 @@ describe("gated files", () => {
     expect(run.exitCode).toBe(0);
     expect(run.applied).toEqual(["1_a.sql", "3_c.sql"]);
     expect(run.held).toEqual(["2_b.sql"]);
-    expect(run.log.lines).toContain("[MIGRATIONS] MANUAL_PENDING 2_b.sql — waits for a drain");
+    expect(run.log.lines).toContain("[MIGRATIONS] MANUAL_PENDING 2_b.sql: waits for a drain");
     expect(run.log.text()).not.toContain("Nothing to do");
     // The hint names no command: the runner cannot know the adopter's, and a wrong one on the box
     // (one that also regenerates a source file) is worse than none.
@@ -275,7 +275,7 @@ describe("gated files", () => {
     expect(again.exitCode).toBe(0);
     expect(again.held).toEqual(["2_b.sql"]);
     expect(again.log.text()).not.toContain("Nothing to do");
-    expect(again.log.lines).toContain("[MIGRATIONS] MANUAL_PENDING 2_b.sql — waits for a drain");
+    expect(again.log.lines).toContain("[MIGRATIONS] MANUAL_PENDING 2_b.sql: waits for a drain");
   });
 
   it("counts only the files this run applies", async () => {

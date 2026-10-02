@@ -33,7 +33,9 @@ const NAMED: Record<string, string> = {
   copy: "©",
   reg: "®",
   trade: "™",
-  mdash: "—",
+  // The entity decodes to the character itself: data, not our copy.
+  // eslint-disable-next-line no-restricted-syntax
+  mdash: "\u2014",
   ndash: "–",
   hellip: "…",
   lsquo: "‘",

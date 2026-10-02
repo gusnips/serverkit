@@ -322,6 +322,9 @@ ${TBL}};`;
     : NEVER;
 
   const alias = `${schema.charAt(0).toUpperCase()}${schema.slice(1)}Schema`;
+  // The header of a generated file consumers commit; changing it would make every drift check
+  // fail at once, so it stays until a release says so.
+  // eslint-disable-next-line no-restricted-syntax
   const header = `// ---------------------------------------------------------------------------
 // AUTO-GENERATED — DO NOT EDIT BY HAND.
 // Regenerate after a schema change with \`gusnips-migrate db-types\`.

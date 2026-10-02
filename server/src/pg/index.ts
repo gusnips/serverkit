@@ -5,7 +5,7 @@
  *
  *     const pool = createPgPool({
  *       connectionString: env.DATABASE_URL,
- *       onIdleError: (error) => logger.error("[pg] idle client error — client discarded", { error }),
+ *       onIdleError: (error) => logger.error("[pg] idle client error: client discarded", { error }),
  *     });
  *
  * Behind a subpath because it imports `pg`, which the main entry does not and a Worker adopter

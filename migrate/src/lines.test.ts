@@ -23,7 +23,7 @@ describe("machine lines", () => {
 
   it("formats the held and pending lines", () => {
     expect(manualPendingLine("013_drop.sql", "drops customer columns")).toBe(
-      "[MIGRATIONS] MANUAL_PENDING 013_drop.sql — drops customer columns",
+      "[MIGRATIONS] MANUAL_PENDING 013_drop.sql: drops customer columns",
     );
     expect(manualPendingLine("013_drop.sql", "")).toBe("[MIGRATIONS] MANUAL_PENDING 013_drop.sql");
     expect(statusPendingLine(["041_a.sql", "042_b.sql"])).toBe(
@@ -37,7 +37,7 @@ describe("machine lines", () => {
       execFileSync("bash", ["-c", `LINE="$1"; printf '%s' "\${LINE#${pattern}}"`, "_", line], {
         encoding: "utf8",
       });
-    expect(cut("*MANUAL_PENDING ")).toBe("013_drop.sql — drops customer columns");
+    expect(cut("*MANUAL_PENDING ")).toBe("013_drop.sql: drops customer columns");
     // `[MIGRATIONS]` is a one-character set in bash. It cut nothing from the retired line…
     expect(cut("*[MIGRATIONS] ").length).toBeGreaterThan(0);
     const retired = "[MIGRATIONS] ⏸ Holding 013_drop.sql (manual — needs `bun migrate --manual`).";
@@ -51,6 +51,6 @@ describe("machine lines", () => {
       ),
     ).toBe(retired);
     // …and on this one it only works because PENDING ends in a capital from the set.
-    expect(cut("*[MIGRATIONS] ")).toBe("013_drop.sql — drops customer columns");
+    expect(cut("*[MIGRATIONS] ")).toBe("013_drop.sql: drops customer columns");
   });
 });

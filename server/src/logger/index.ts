@@ -145,7 +145,7 @@ function resolveThreshold(level: string | undefined): number {
   // at boot, so a typo fails the deploy instead of the 3am read.
   throw new Error(
     `Unknown log level ${JSON.stringify(level)}. ` +
-      `Use one of: debug, info, warn, error, silent — or leave it unset for info.`,
+      `Use one of: debug, info, warn, error, silent. Or leave it unset for info.`,
   );
 }
 

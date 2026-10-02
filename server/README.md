@@ -11,7 +11,7 @@ bun add @gusnips/server @gusnips/http
 `@gusnips/http` declares the envelope, and your API and your browser client both import it, so
 there is one declaration of the wire contract and not two. Install it whenever you answer a
 request. It is an optional peer rather than a required one because this package uses it for its
-types only, so its code never runs here — which means a server reaching only for a subpath like
+types only, so its code never runs here, which means a server reaching only for a subpath like
 `@gusnips/server/pg` installs the one package it actually loads:
 
 ```bash
@@ -31,7 +31,7 @@ two ends of one request never disagree about the shape.
 
 **Import `ApiErrorBody`, `ApiSuccess` and `PaginationMeta` from `@gusnips/http`, not from here.**
 This package does not re-export them, on purpose: two names for one type is how a version skew
-becomes invisible. You already have the import — the contract is the package your client reads
+becomes invisible. You already have the import: the contract is the package your client reads
 it from too.
 
 ## Answering a request
@@ -99,7 +99,7 @@ the error: `logger.error("failed", { error: err })` writes `{"error":{"error":{c
 with no stack and no cause. Seven backends on this stack define one and all seven log exactly
 that.
 
-`createLogger` recovers the error anyway — the replacer reads it back off the holder — so your
+`createLogger` recovers the error anyway (the replacer reads it back off the holder), so your
 own classes are safe either way. `AppError` still does not define one, because the wire body
 belongs to `errorResponse`, where the mask lives: one function owns the shape a client sees, and
 the error stays an error.
@@ -123,14 +123,14 @@ concurrency: (limit: number) =>
 
 This is the rule with the best bug-per-line ratio in the whole extraction. One backend writes a
 `resetAt` ISO date that no HTTP client parses, and then keeps a hand-written list of "codes that
-do not clear by waiting" in its browser app to compensate — its own comment says that is why the
+do not clear by waiting" in its browser app to compensate. Its own comment says that is why the
 list exists. Another backend needs no list, because every 429 it sends states its wait. A third
 raises a spent daily cap with no wait at all, on a code its client reads as transient, so the
-browser retries a limit that clears at midnight — twice, immediately, and says the same thing
+browser retries a limit that clears at midnight: twice, immediately, and says the same thing
 three times to a limiter that is already counting.
 
 Asking each refusal how it clears answers the question those lists were guessing at, and it
-answers it in the one place that knows: where the refusal is raised. A code cannot know — the
+answers it in the one place that knows: where the refusal is raised. A code cannot know: the
 same `QUOTA_EXCEEDED` can be a month that clears in days or a slot that clears in two seconds.
 
 Of 40 places that raise a 429 in the fleet this came from, 34 already state a wait. Of the six
@@ -147,10 +147,10 @@ already reset (`-3`) as `0`.
 Two edges worth knowing:
 
 - The obligation follows the code's whole status set. A code narrowed to a union that _could_ be
-  the 429 owes the wait too — `appError(code, msg)` where `code` is
+  the 429 owes the wait too: `appError(code, msg)` where `code` is
   `"NOT_FOUND" | "RATE_LIMIT_EXCEEDED"` does not compile without one.
 - **Only the obligation is 429-only.** Any code may state a wait, and a number renders
-  `Retry-After` at any status. Reach for it when ONE of your codes is raised in two senses —
+  `Retry-After` at any status. Reach for it when ONE of your codes is raised in two senses,
   one that clears on its own and one that does not. A `SERVICE_UNAVAILABLE` meaning "not
   configured on this deployment" and one meaning "did not answer just now" are the same code and
   the same status, so a client cannot separate them; the raiser can, with a number or an
@@ -183,7 +183,7 @@ Every throw lands in one of four arms:
 | anything else                | a generic 500                                | `unexpected` |
 
 `kind` is the one thing you cannot read off the status. A 500 you raised and a `TypeError` that
-escaped are both 500s, and only the second one means nobody is watching a log for it — which is
+escaped are both 500s, and only the second one means nobody is watching a log for it. That is
 the branch where an alert belongs.
 
 Bind it once, at the edge of your app, and import that one function everywhere else. A tool
@@ -193,7 +193,7 @@ message on a 503 while the API next door masked exactly that.
 
 ### What reaches the client, and what does not
 
-**A validation failure ships the field path, the failed rule, and — for a range — the bound it
+**A validation failure ships the field path, the failed rule, and, for a range, the bound it
 failed against. Nothing else.** Handing your validator's issues straight through ships back the
 caller's own key names, the enum's allowed values, the validator's English sentence and the
 expected type. The bound is the exception and it belongs to the caller: it is your published
@@ -226,8 +226,8 @@ generic 500 takes away the one thing that tells a developer whether to retry.
 > authored sentences back in.
 
 `maskDetails` is a separate knob, because it is a separate decision. Some backends put a
-readiness report in a 503's `details` — which dependency is down, for the deploy gate and for a
-human at 3am — and need it on the wire. Others record caught error text there, and must never
+readiness report in a 503's `details` (which dependency is down, for the deploy gate and for a
+human at 3am) and need it on the wire. Others record caught error text there, and must never
 send it. Both are right about their own repo.
 
 **When a message is masked, the status is not.** A status comes from your own map and discloses
@@ -240,7 +240,7 @@ the generic 500.
 
 `createLogger` writes one JSON line per event to stdout, and nothing else. Twelve backends were
 read for this and not one installs a logging library, so this ships no transports, no file
-rotation and no extra levels — every one of them runs under something that already owns stdout.
+rotation and no extra levels. Every one of them runs under something that already owns stdout.
 
 ```ts
 import { createLogger } from "@gusnips/server";
@@ -251,7 +251,7 @@ logger.error("charge failed", { orderId, error: err }); // the RAW error, never 
 ```
 
 **Pass the error itself.** `message` and `stack` are non-enumerable, so a plain
-`JSON.stringify(err)` is `{}` — which is how a logger ends up printing nothing about the failure
+`JSON.stringify(err)` is `{}`, which is how a logger ends up printing nothing about the failure
 it was called to report. The serializer adds them, follows the `cause` chain and an
 `AggregateError`'s `errors`, and collapses a circular reference instead of crashing the log call.
 An error passed on its own, `logger.error("drain failed", err)`, is written under `error` too.
@@ -261,7 +261,7 @@ because of an incident rather than because of duplication. An SDK hangs its own 
 error it throws: a payment vendor's signature-verification error carries the unparsed webhook
 body and the signature, a Redis client puts the AUTH password in `command.args`, and a Postgres
 `DatabaseError` carries statement text with its literals in it. A loop over own properties copies
-all of that, and a webhook route is unauthenticated by definition — so anyone on the internet
+all of that, and a webhook route is unauthenticated by definition, so anyone on the internet
 could choose what went into the log. The list admits 4 of that payment error's 25 properties, and
 it covers the `cause` chain, including a link that is not an `Error`.
 
@@ -292,7 +292,7 @@ incident it was meant to explain.
 ## Hono
 
 `@gusnips/server/hono` is the only part that knows a framework, which is why it is a subpath:
-`hono` is an optional peer and nothing in the root entry imports it. Needs `hono >= 4.9.9` —
+`hono` is an optional peer and nothing in the root entry imports it. Needs `hono >= 4.9.9`:
 before that, `routePath(c, -1)` silently ignores the `-1` and the request line names the wrong
 route.
 
@@ -325,7 +325,7 @@ app.delete("/users/:id", (c) => noContent(c)); // 204, no body, no content-type
 
 Three adopters wrote those four functions by hand before they were here, and one of the three
 got the unwrap wrong in production. `ok` takes an explicit status for the cases that are not
-200 — `ok(c, job, 202)` where the route accepted rather than answered — and a fourth argument for
+200 (`ok(c, job, 202)` where the route accepted rather than answered) and a fourth argument for
 a product's own meta, so a metered read answers `{ data, meta }` without leaving the adapter:
 
 ```ts
@@ -334,7 +334,7 @@ app.get("/lookup", (c) => ok(c, profile, 200, { creditsCharged: 1, cache: "hit" 
 
 **`errorBoundary` is not optional.** Hono hands `onError` only what is `instanceof Error`.
 Anything else is rethrown past every layer and escapes as an unhandled rejection: no answer, a
-dropped connection, and a browser that reports it as a CORS failure — which sends whoever reads
+dropped connection, and a browser that reports it as a CORS failure, which sends whoever reads
 it to the wrong layer entirely. A PostgREST client rejects with plain objects, so this is not
 hypothetical. The boundary wraps one in an `Error` and keeps the original as `cause`.
 
@@ -347,8 +347,8 @@ Add safe product metadata with `requestLogger<AppEnv>({ logger, fields: (c) => (
 bounded, sanitized values, never a raw path, query, header set, body or authentication object. Your
 fields are written first, so they cannot replace the canonical request id, method, route, status,
 duration or error code. A hook that throws is caught: the line is written with
-`requestFieldsFailed: true` instead of your fields. A value whose own `toJSON` throws is not — that
-one loses the whole line, request id included — so return plain data, not live objects.
+`requestFieldsFailed: true` instead of your fields. A value whose own `toJSON` throws is not: that
+one loses the whole line (request id included), so return plain data, not live objects.
 
 The request id goes back on `X-Request-ID`, on every answer including `onError`'s and
 `notFound`'s. A caller's own id is echoed only if it is 64 characters of `A-Z a-z 0-9 . _ -`,
@@ -406,12 +406,12 @@ assertEveryRouteGuarded(buildApp(), { isPublic: underAny(PUBLIC_PREFIXES) });
 ```
 
 It walks every registered route through Hono's **own matcher** and fails naming each endpoint no
-guard runs in front of. The matcher is the point: a `use` registered AFTER its `route` never runs
-— the handler answers and the guard silently does not fire. A route whose guard did not fire is
+guard runs in front of. The matcher is the point: a `use` registered AFTER its `route` never runs.
+The handler answers and the guard silently does not fire. A route whose guard did not fire is
 indistinguishable from one with no guard, and comparing pattern lists cannot tell you which you
 have.
 
-Pass the app's own public rule, never a second list kept for the test — an exemption list nothing
+Pass the app's own public rule, never a second list kept for the test. An exemption list nothing
 else reads is the next thing to drift. It also fails a guard that runs in front of nothing, and
 an app with no endpoints, so the check cannot pass by asking nothing.
 
@@ -440,7 +440,7 @@ if (error || !data.user) throw errors.invalidToken();
 ```
 
 Only a refusal ends a session. Browser clients read a 401 as "your session is over" and sign the
-person out, so answering an outage with a 401 signs out everyone who made a request during it —
+person out, so answering an outage with a 401 signs out everyone who made a request during it,
 while the refresh they are all waiting on is still in flight. A 503 is retried instead.
 
 It tests two things and both are needed. The SDK's own `isAuthRetryableFetchError` catches a
@@ -469,20 +469,20 @@ import { createPgPool } from "@gusnips/server/pg";
 
 const pool = createPgPool({
   connectionString: env.DATABASE_URL,
-  onIdleError: (error) => logger.error("[pg] idle client error — client discarded", { error }),
+  onIdleError: (error) => logger.error("[pg] idle client error: client discarded", { error }),
 });
 ```
 
 **It bounds the wait for a free connection.** Without `connectionTimeoutMillis`, node-postgres
 puts a caller that finds the pool full on a queue with no timer, and it waits forever. `max`
-defaults to 10, so ten slow queries at once are enough: every request after them — auth,
-billing, the workers, `/health` — hangs with no error, no log and no metric. That is not a 500,
+defaults to 10, so ten slow queries at once are enough: every request after them (auth,
+billing, the workers, `/health`) hangs with no error, no log and no metric. That is not a 500,
 it is silence, which is why it survives in a codebase. Eleven backends were measured for this
 and one had it bounded. The default here is 10 seconds; pass
 `connectionTimeoutMillis: 0` to wait forever on purpose, which a batch job may want.
 
 **It makes the idle-error handler impossible to forget.** A `Pool` emits `error` when the server
-closes an idle client — a restart, a failover, a dropped tunnel. With no listener, Node turns
+closes an idle client: a restart, a failover, a dropped tunnel. With no listener, Node turns
 that into an uncaught exception and a crash handler exits the process, so a connection nobody
 was using takes the API down. `onIdleError` is a required field, not an option.
 
@@ -503,10 +503,10 @@ const ok = await pingPool(pool, {
 
 A raw `SELECT 1` hangs when the database hangs, which is the one thing a health check must not
 do: an orchestrator reads a timeout as "unknown" where it would read `false` as "replace this
-container". `connectionTimeoutMillis` does not cover it — that bounds getting a connection, not
+container". `connectionTimeoutMillis` does not cover it: that bounds getting a connection, not
 the query once you hold one.
 
-Two things stay yours. The pool **singleton** — a package that holds it decides when your process
+Two things stay yours. The pool **singleton**: a package that holds it decides when your process
 can exit. And the **`ssl` option**: `@gusnips/migrate` exports `pgSsl`, which infers it from the
 connection URL, so spread it in beside `connectionString`.
 
@@ -595,7 +595,7 @@ workspace's keys to go with it.
 
 ## Redis
 
-If your API uses Redis — for BullMQ, for rate-limit windows, for a cache — the connection and
+If your API uses Redis (for BullMQ, for rate-limit windows, for a cache), the connection and
 the probe that reads it are one decision, because the first makes the second necessary.
 
 ```bash
@@ -612,7 +612,7 @@ const redis = createRedis({
 ```
 
 **It makes the error handler impossible to forget.** Without one, a failed connect prints a bare
-stack to stderr through ioredis's own `console.error` and reaches the app's logger not at all — so
+stack to stderr through ioredis's own `console.error` and reaches the app's logger not at all, so
 the one signal that a dependency has stopped answering lands outside the place an operator is
 already looking. `onError` is a required field, not an option. Four backends were measured for
 this: all four wrote the listener, all four wrote a comment saying it is not optional, and the
@@ -622,18 +622,18 @@ function around it was byte-identical in every one.
 say an EventEmitter with no `error` listener throws, so a blip becomes a process exit through a
 crash handler. True of an EventEmitter, false of ioredis: `silentEmit` checks the listener count
 and, finding none, logs and returns without ever emitting. Measured on ioredis 5.10.1 under bun
-1.3.8 and node 22 — the process survives and `uncaughtException` never fires. `createPgPool`'s
+1.3.8 and node 22: the process survives and `uncaughtException` never fires. `createPgPool`'s
 `onIdleError` is NOT the same case, checked the same way rather than assumed: `pg-pool` calls
 `pool.emit("error", err, client)` with no listener-count guard, so there the listener really is what
 stands between an idle-client error and a crash. One library's sentence was copied onto another.
 
 **It defaults `maxRetriesPerRequest` to `null`, and that is the opposite kind of default from
 `createPgPool`'s.** There the default makes an unbounded wait bounded; here it makes commands
-wait forever — because BullMQ requires it, since its blocking reads must never be cut short by a
+wait forever, because BullMQ requires it: its blocking reads must never be cut short by a
 retry limit. So the default is right and it has a consequence worth saying once:
 
 **every read on this connection needs its own bound.** A `ping`, a cache lookup, a limiter
-check — with Redis down, each waits rather than failing. Pass `maxRetriesPerRequest: 3` for a
+check: with Redis down, each waits rather than failing. Pass `maxRetriesPerRequest: 3` for a
 connection that serves ordinary commands instead of BullMQ's. A `queue.add()` waits too, and a
 bound is not enough for it (below).
 
@@ -675,12 +675,12 @@ const ok = await pingRedis(redis, {
 });
 ```
 
-Four hand-written copies of that bound exist in this fleet and all four leak their timer — a
+Four hand-written copies of that bound exist in this fleet and all four leak their timer: a
 pending 2-second timer per health check, in a process something probes every few seconds. This
 one clears it.
 
 A worker gets a boot gate, because a process whose queues can never connect must not sit there
-looking healthy — that looks exactly like an empty queue:
+looking healthy. That looks exactly like an empty queue:
 
 ```ts
 await assertRedisReachable(redis, {
@@ -1691,7 +1691,7 @@ Each of these was measured, not assumed.
   prose.
 - **A logging library, a transport, or an alerting client.** The measured gap between 60 lines
   of `console.log(JSON.stringify(...))` and a real logging library is the error serializer, and
-  the standard one ships the same copy-loop this package exists to remove — so `createLogger` is
+  the standard one ships the same copy-loop this package exists to remove, so `createLogger` is
   those 60 lines with the serializer fixed, and nothing else. `errorResponse` returns `kind` and
   `errorHandler` takes `onUnexpected`, so alerting is yours to route.
 - **A styled error page.**

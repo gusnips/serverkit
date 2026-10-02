@@ -11,7 +11,7 @@
 export const LOG_PREFIX = "[MIGRATIONS]";
 
 /**
- * One line per gated file a run held back: `[MIGRATIONS] MANUAL_PENDING <file> — <reason>`.
+ * One line per gated file a run held back: `[MIGRATIONS] MANUAL_PENDING <file>: <reason>`.
  *
  * Workflows read it with `grep -F '[MIGRATIONS] MANUAL_PENDING'` and cut the prefix with
  * `${LINE#*MANUAL_PENDING }`. That pattern has no brackets in it on purpose: in a shell pattern
@@ -28,7 +28,7 @@ export const STATUS_PENDING = `${LOG_PREFIX} Status: PENDING`;
 export const STATUS_UP_TO_DATE = `${LOG_PREFIX} Status: up to date`;
 
 export function manualPendingLine(file: string, reason: string): string {
-  return reason ? `${MANUAL_PENDING} ${file} — ${reason}` : `${MANUAL_PENDING} ${file}`;
+  return reason ? `${MANUAL_PENDING} ${file}: ${reason}` : `${MANUAL_PENDING} ${file}`;
 }
 
 export function statusPendingLine(files: readonly string[]): string {
