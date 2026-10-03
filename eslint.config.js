@@ -1,11 +1,9 @@
 import js from "@eslint/js";
 import tseslint from "typescript-eslint";
 
-/** An em dash gives away AI-written text, so none may reach a reader. Checks every string,
- *  template piece and JSX-free literal in library source; comments are not nodes, so they stay
- *  free. Tests and scripts/ restate nothing: they are exempt below. The regex uses a unicode
- *  escape so this file does not contain the character itself. READMEs and package.json are
- *  covered by scripts/check-no-em-dash.ts. */
+/** Check strings and template pieces in library source. Implementation comments, tests and
+ *  scripts/ stay exempt. scripts/check-no-em-dash.ts covers READMEs, package.json, published
+ *  JSDoc and HTML entities in source text. The unicode escape keeps the character out of this file. */
 const NO_EM_DASH = ["Literal[value=/\\u2014/]", "TemplateElement[value.cooked=/\\u2014/]"].map(
   (selector) => ({
     selector,
