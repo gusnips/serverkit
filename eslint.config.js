@@ -6,7 +6,7 @@ import tseslint from "typescript-eslint";
  *  free. Tests and scripts/ restate nothing: they are exempt below. The regex uses a unicode
  *  escape so this file does not contain the character itself. READMEs and package.json are
  *  covered by scripts/check-no-em-dash.ts. */
-const NO_EM_DASH = ["Literal[value=/\\u2014/]", "TemplateElement[value.raw=/\\u2014/]"].map(
+const NO_EM_DASH = ["Literal[value=/\\u2014/]", "TemplateElement[value.cooked=/\\u2014/]"].map(
   (selector) => ({
     selector,
     message: "No em dash in user-facing text. Use a period, comma, colon or parentheses.",
