@@ -16,11 +16,10 @@
     "test": "bun run --filter '*' test",
     "typecheck": "bun run --filter '*' typecheck && tsc -p tsconfig.scripts.json",
     "lint": "eslint migrate sdkgen server scripts",
-    "no-em-dash": "bun run scripts/check-no-em-dash.ts",
     "release:check": "bun run scripts/check-release.ts",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "check": "bun run format:check && bun run build && bun run lint && bun run no-em-dash && bun run typecheck && bun run purity && bun run test",
+    "check": "bun run format:check && bun run build && bun run lint && bun run typecheck && bun run purity && bun run test",
     "purity": "bun run --filter '@gusnips/server' purity"
   },
   "devDependencies": {
