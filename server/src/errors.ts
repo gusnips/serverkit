@@ -3,8 +3,7 @@
  *
  * Extracted from six backends whose copies of this file are byte-identical in the parts that
  * matter: the envelope builder in four of them, `toMessage()` in six. Where they differ, the
- * version carrying the production reason won — every comment below names a failure somebody
- * shipped.
+ * version carrying the production reason won. Every comment below names a failure somebody shipped.
  *
  * Nothing here knows about the wire. That is deliberate and it is the fix to a live bug; see
  * the note on {@link AppError}.
@@ -35,11 +34,11 @@ export interface AppErrorOptions<Key extends string = string> {
    */
   retryAfterSecs?: number | null;
   /**
-   * The `message` was authored for the client — a deployment fact like "payments are not set
-   * up here", a named dependency that is down — so a 5xx keeps it instead of the generic
-   * sentence. Never set it on a message built from a caught error: that is where driver text
-   * lives, and one donor's whole masking policy exists because its repository layer
-   * interpolates the driver's message into every failure it raises.
+   * The `message` was authored for the client, such as "payments are not set up here" or a named
+   * dependency that is down. A 5xx keeps it instead of the generic sentence. Never set it on a
+   * message built from a caught error: that is where driver text lives, and one donor's whole
+   * masking policy exists because its repository layer interpolates the driver's message into every
+   * failure it raises.
    */
   expose?: boolean;
   cause?: unknown;
@@ -64,14 +63,14 @@ export interface AppErrorOptions<Key extends string = string> {
  * **There is no `toJSON()`, on purpose**, and the reason is not the one first written here.
  * `JSON.stringify` calls a value's own `toJSON()` BEFORE the replacer, so an error class that
  * defines one hands a logger whatever that method returns instead of the error. Seven backends
- * define one, and every one of them logs `{"error":{"error":{code,message}}}` — doubly nested,
- * no `stack`, no `cause` — from a line that still looks like a log line.
+ * define one, and every one of them logs `{"error":{"error":{code,message}}}`. The error is doubly
+ * nested, with no `stack` or `cause`, but the line still looks like a log line.
  *
- * This file used to say a logger cannot fix that from its side. It can, and ours does: the
- * replacer is called with the HOLDER as `this`, whose own property is still the untouched error
- * (see `errorReplacer`). What remains true is the design: the wire body is built by
- * `errorResponse`, where the mask lives anyway, so one function owns the shape a client sees —
- * and this stays an ordinary Error to anything that serializes it.
+ * This file used to say a logger cannot fix that from its side. It can, and ours does: the replacer
+ * is called with the HOLDER as `this`, whose own property is still the untouched error (see
+ * `errorReplacer`). What remains true is the design: the wire body is built by `errorResponse`,
+ * where the mask lives anyway, so one function owns the shape a client sees, while this stays an
+ * ordinary Error to anything that serializes it.
  */
 export class AppError<Code extends string = string, Key extends string = string> extends Error {
   public readonly statusCode: number;
@@ -96,14 +95,14 @@ export class AppError<Code extends string = string, Key extends string = string>
 }
 
 /**
- * A map is widened to `Record<string, number>` unless it is declared `as const`, and a widened
- * map cannot tell a 429 from a 404 — so the rule below would silently stop applying. Refusing
- * the map is loud; accepting it with the guard switched off is the failure this package spends
- * a paragraph on everywhere else.
+ * A map is widened to `Record<string, number>` unless it is declared `as const`, and a widened map
+ * cannot tell a 429 from a 404, so the rule below would silently stop applying. Refusing the map is
+ * loud; accepting it with the guard switched off is the failure this package spends a paragraph on
+ * everywhere else.
  *
  * It catches the HALF-widened map too, which is the realistic way this happens: one status read
  * from config turns `404 | number` into `number`, and the whole map loses its literals. The
- * property name is what the compiler prints, so it is plain ASCII — an arrow there comes out as
+ * property name is what the compiler prints, so it is plain ASCII. An arrow there comes out as
  * `\u2192` in the diagnostic, and the message is the entire point of the trick.
  */
 type LiteralStatuses<S> = number extends S[keyof S]
@@ -113,55 +112,54 @@ type LiteralStatuses<S> = number extends S[keyof S]
 /**
  * Extra options a code's status makes mandatory.
  *
- * **A 429 states its own wait.** This is the highest-value line extracted from the whole
- * reading. One donor writes a `resetAt` ISO date that no HTTP client parses, and then needs a
- * hand-maintained list of "codes that do not clear by waiting" in its browser app to
- * compensate — its own comment says so. Another donor needs no such list, because every 429 it
- * sends states its wait, and a stated wait answers the question the list was guessing at. A
- * third raises a spent DAILY cap with no wait at all, on a code its client treats as transient,
- * so the browser retries a limit that clears at midnight — twice, immediately.
+ * **A 429 states its own wait.** This is the highest-value line extracted from the whole reading.
+ * One donor writes a `resetAt` ISO date that no HTTP client parses, and then needs a
+ * hand-maintained list of "codes that do not clear by waiting" in its browser app to compensate, as
+ * its own comment says. Another donor needs no such list, because every 429 it sends states its
+ * wait, and a stated wait answers the question the list was guessing at. A third raises a spent
+ * DAILY cap with no wait at all, on a code its client treats as transient, so the browser retries a
+ * limit that clears at midnight, twice, immediately.
  *
  * Making it a required argument deletes that list from three repos and makes the retry bug
  * unrepresentable. Measured against the fleet it came from: of 40 places that raise a 429,
  * **34 already state a wait**, so the rule costs six edits in six repos.
  *
- * It is `[429] extends [Status]`, not `Status extends 429`, because the second form distributes:
- * a code narrowed to a UNION — off a lookup table, a switch, a value read from the wire —
- * produced a union of argument tuples, one of which had the options optional, and an empty
- * argument list satisfied it. The obligation vanished on exactly the shape that is hardest to
- * read. The tuples stop the distribution, and they ask the better question: does this code's
- * status set INCLUDE 429. A widened `number` then requires the wait everywhere rather than
- * nowhere, which is the safe direction to fail.
+ * It is `[429] extends [Status]`, not `Status extends 429`, because the second form distributes: a
+ * code narrowed to a UNION (off a lookup table, a switch, or a value read from the wire) produced a
+ * union of argument tuples, one of which had the options optional, and an empty argument list
+ * satisfied it. The obligation vanished on exactly the shape that is hardest to read. The tuples
+ * stop the distribution, and they ask the better question: does this code's status set INCLUDE 429.
+ * A widened `number` then requires the wait everywhere rather than nowhere, which is the safe
+ * direction to fail.
  *
- * Deliberately not extended, and the same counting method is what settled each one. Three
- * statuses, one method, three different answers — which is the strongest thing that can be said
- * for the method:
+ * Deliberately not extended, and the same counting method is what settled each one. Three statuses,
+ * one method, three different answers. That is the strongest thing that can be said for the method:
  *
- * - **429 — obligation.** 34 of 40 raises already state a wait, so the required argument mostly
+ * - **429: obligation.** 34 of 40 raises already state a wait, so the required argument mostly
  *   records a decision somebody had already made, and each of the six exceptions is
  *   interesting.
- * - **503 — capability, not obligation.** Only 16 of 94 raises of a 502/503/504 factory state
+ * - **503: capability, not obligation.** Only 16 of 94 raises of a 502/503/504 factory state
  *   one. Most are "the database is unreachable" or "payments are not configured here", which
  *   have no wait to state, so a rule would buy 78 `null`s and teach people to type one without
- *   reading — and a client cannot tell a considered `null` from a reflex one. The raiser who
+ *   reading. A client cannot tell a considered `null` from a reflex one. The raiser who
  *   knows is rare, and that is exactly the shape where a capability beats an obligation.
- * - **402 — nothing to add.** Of 13 raises across five repos, **none** states a wait. That is
+ * - **402: nothing to add.** Of 13 raises across five repos, **none** states a wait. That is
  *   what was measured, and it is all that was: it says no raiser in these repos claims a 402
  *   clears by waiting, not that none ever could. A card retry window or a transfer clearing
- *   overnight would be a real one — and it can say so, because the wait is available at every
+ *   overnight would be a real one, and it can say so because the wait is available at every
  *   status. The day one turns up it is a finding rather than a contradiction.
  *
- * So the capability is on every code: a number renders `Retry-After` at any status, and an
- * explicit `null` says "durable". The residual gap it closes is narrower than "503s need
- * waits" — it is ONE code raised in two senses, durable and transient, indistinguishable in the
- * envelope. The raiser that answers closes it for its own code, and nobody else is nagged.
+ * So the capability is on every code: a number renders `Retry-After` at any status, and an explicit
+ * `null` says "durable". The residual gap it closes is narrower than "503s need waits": it is ONE
+ * code raised in two senses, durable and transient, indistinguishable in the envelope. The raiser
+ * that answers closes it for its own code, and nobody else is nagged.
  *
- * `null` is the other half, and the six are what proved it necessary. Two of them cannot state
- * a wait truthfully: a concurrency slot frees when somebody else's job finishes, and a cap on
- * live objects clears by archiving one, never by waiting at all. A required `number` would have
- * forced both to invent a number. `null` says "waiting cannot fix this" — which is the very
- * question the code lists were guessing at, answered by the one place that knows: the raiser.
- * An omission is invisible in a diff; a `null` is a claim somebody has to read.
+ * `null` is the other half, and the six are what proved it necessary. Two of them cannot state a
+ * wait truthfully: a concurrency slot frees when somebody else's job finishes, and a cap on live
+ * objects clears by archiving one, never by waiting at all. A required `number` would have forced
+ * both to invent a number. `null` says "waiting cannot fix this". The raiser knows the answer to
+ * the question the code lists were guessing at. An omission is invisible in a diff; a `null` is a
+ * claim somebody has to read.
  */
 type RequiredOptions<Status, Key extends string> = [429] extends [Status]
   ? [opts: AppErrorOptions<Key> & { retryAfterSecs: number | null }]
@@ -185,9 +183,9 @@ type RequiredOptions<Status, Key extends string> = [429] extends [Status]
  * };
  * ```
  *
- * The `satisfies` on your map is what makes a code with no status a build error — one line,
- * in your repo, and the only version of this that cannot drift. Three of the five newest
- * donors pass the status at every call site instead, which compiles no matter what.
+ * The `satisfies` on your map is what makes a code with no status a build error. It is one line in
+ * your repo, and the only version of this that cannot drift. Three of the five newest donors pass
+ * the status at every call site instead, which compiles no matter what.
  */
 export function createAppError<S extends Record<string, number>, Key extends string = string>(
   statusOf: S & LiteralStatuses<S>,
@@ -233,8 +231,7 @@ function safeStringify(value: unknown): string {
  * The single home for the `err instanceof Error ? err.message : String(err)` idiom, which is
  * wrong twice over and shipped that way in six repos:
  *
- * 1. A data layer rejects with a PLAIN OBJECT — `{code, message, hint}` is what PostgREST and
- *    several drivers throw — so the useful text is in `message` and `String()` never reads it.
+ * 1. A data layer rejects with a PLAIN OBJECT, such as the `{code, message, hint}` that PostgREST and several drivers throw. The useful text is in `message` and `String()` never reads it.
  *    Six donors fixed this half.
  * 2. An object with no string `message` still flattens to `"[object Object]"`, which is the
  *    real failure masked by a useless string. One donor fixed that half and named it exactly:

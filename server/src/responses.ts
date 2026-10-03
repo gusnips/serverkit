@@ -2,13 +2,13 @@
  * How a backend answers: the success envelope, and the one function that turns a thrown thing
  * into an HTTP answer.
  *
- * Nothing here knows about a framework, and that is a measurement rather than a preference.
- * Five backends put this logic inside one `app.onError`, and then **three of them re-derived
- * the same two arms inside an MCP tool wrapper** so an agent would get a real refusal instead
- * of "an unexpected error occurred". A fourth re-derived the error body inside a background
- * worker's health handler and got it wrong, answering a caught Redis message on a 503 — the
- * API next door masks exactly that. A `Context`-shaped function would serve one of those four
- * callers. The framework adapter is eight lines and lives in `/hono`.
+ * Nothing here knows about a framework, and that is a measurement rather than a preference. Five
+ * backends put this logic inside one `app.onError`, and then **three of them re-derived the same
+ * two arms inside an MCP tool wrapper** so an agent would get a real refusal instead of "an
+ * unexpected error occurred". A fourth re-derived the error body inside a background worker's
+ * health handler and got it wrong, answering a caught Redis message on a 503. The API next door
+ * masks exactly that. A `Context`-shaped function would serve one of those four callers. The
+ * framework adapter is eight lines and lives in `/hono`.
  */
 import type { ApiErrorBody, ApiSuccess, PaginationMeta, ValidationIssue } from "@gusnips/http";
 import { AppError } from "./errors.ts";
@@ -16,16 +16,16 @@ import { AppError } from "./errors.ts";
 /**
  * The `body` is `{ data }`, or `{ data, meta }` where a route has counts to report.
  *
- * What comes back is an ANSWER — `{ status, body }` — not a body, because this layer is
+ * What comes back is an ANSWER, `{ status, body }`, not a body, because this layer is
  * framework-free and has to hand its caller a status too. An adapter takes `.body`:
  *
  *     return c.json(ok(data), status);        // WRONG: {"status":200,"body":{"data":…}}
  *     return c.json(ok(data).body, status);   // the envelope
  *
- * Nothing catches the first line — `c.json` takes any JSON value, the status is still whatever
- * you passed, and a test that calls this module never sees the body its caller sends. It shipped,
- * and a client found it. On Hono, import `ok` from `@gusnips/server/hono` instead: the four
- * adapters there take the `Context`, and the question does not arise.
+ * Nothing catches the first line: `c.json` takes any JSON value, the status is still whatever you
+ * passed, and a test that calls this module never sees the body its caller sends. It shipped, and a
+ * client found it. On Hono, import `ok` from `@gusnips/server/hono` instead: the four adapters
+ * there take the `Context`, and the question does not arise.
  */
 export function ok<T, M = PaginationMeta>(data: T, meta?: M) {
   const body: ApiSuccess<T, M> = meta === undefined ? { data } : { data, meta };
@@ -57,18 +57,18 @@ export function noContent() {
 export interface ErrorAnswer<Code extends string = string, Key extends string = string> {
   status: number;
   /**
-   * `messageKey` is your key union here, not `string`, so the body fits a typed slot of your own
-   * — a stream frame, a failed job's record — without a cast. The wire type stays `string`,
+   * `messageKey` is your key union here, not `string`, so the body fits a typed slot of your own,
+   * such as a stream frame or a failed job's record, without a cast. The wire type stays `string`,
    * because a client cannot check a key it was sent; the server that raised it can.
    */
   body: ApiErrorBody<Code> & { error: { messageKey?: Key } };
   /** `Retry-After` when the refusal states a wait; `WWW-Authenticate` on a 401. */
   headers: Record<string, string>;
   /**
-   * What kind of failure this was, which is the one thing a caller cannot work out from the
-   * status. A 500 raised on purpose and a `TypeError` that escaped are both 500s, and only the
-   * second one means nobody is watching a log for it — every donor fires its admin alert on
-   * exactly that branch.
+   * What kind of failure this was, which is the one thing a caller cannot work out from the status.
+   * A 500 raised on purpose and a `TypeError` that escaped are both 500s, and only the second one
+   * means nobody is watching a log for it. Every donor fires its admin alert on exactly that
+   * branch.
    */
   kind: "client" | "server" | "unexpected";
 }
@@ -92,27 +92,25 @@ export interface ErrorResponseOptions<Code extends string, Key extends string> {
    * `GATEWAY_ERROR` or a `SERVICE_UNAVAILABLE` into a generic 500 "would take away the one
    * thing that tells a developer whether to retry."
    *
-   * **That default is safe because of your call sites, not because of this code.** It holds
-   * only while every non-masked 5xx is handed a message somebody wrote for the client. A repo
-   * whose repository layer interpolates the driver's error into the message it raises — one
-   * donor's does, deliberately, so that duplicate-key heuristics keep working — wants
-   * `maskAll` instead.
+   * **That default is safe because of your call sites, not because of this code.** It holds only
+   * while every non-masked 5xx is handed a message somebody wrote for the client. A repo whose
+   * repository layer interpolates the driver's error into the message it raises wants `maskAll`
+   * instead. One donor does this deliberately so that duplicate-key heuristics keep working.
    */
   maskedCodes?: readonly Code[];
   /** Replace every 5xx message, and let `expose` be what opts an authored sentence back in. */
   maskAll?: boolean;
   /**
-   * Drop `details` from a 5xx whose message you did NOT mask — a separate knob because it is a
-   * separate decision. The newest donors put a readiness report in a 503's details, naming
-   * which dependency is down so a deploy gate and a human at 3am can both read it; another
-   * donor's details are where caught error text is recorded, and must never go out. Both are
-   * right about their own repo, which is why this is not folded into the mask above. (A masked
-   * 5xx drops its details on its own: the body is built fresh from `internal`.)
+   * Drop `details` from a 5xx whose message you did NOT mask. This is a separate option because it
+   * is a separate decision. The newest donors put a readiness report in a 503's details, naming
+   * which dependency is down so a deploy gate and a human at 3am can both read it; another donor's
+   * details are where caught error text is recorded, and must never go out. Both are right about
+   * their own repo, which is why this is not folded into the mask above. (A masked 5xx drops its
+   * details on its own: the body is built fresh from `internal`.)
    *
    * The sharpest reason to turn it on is a caught driver error handed straight to `details`.
    * On a CHECK or NOT NULL violation Postgres writes the ENTIRE failing row into its `detail`
-   * field — `Failing row contains (someone@example.com, 4242…)`, every column, values
-   * included. Measured against a real server, not assumed.
+   * field: `Failing row contains (someone@example.com, 4242…)`, every column, values included. Measured against a real server, not assumed.
    */
   maskDetails?: boolean;
 }
@@ -189,9 +187,9 @@ function envelope<Code extends string, Key extends string>(
 }
 
 /**
- * What an issue MIGHT carry — every field optional, because the gate below proves only that
- * `issues` is an array and nothing at all about an element. Typing the element as certain is
- * what turned this projection into a throw: `path.map` on an issue that arrived without one.
+ * What an issue MIGHT carry. Every field is optional, because the gate below proves only that
+ * `issues` is an array and nothing at all about an element. Typing the element as certain is what
+ * turned this projection into a throw: `path.map` on an issue that arrived without one.
  */
 interface RawIssue {
   readonly path?: unknown;
@@ -228,15 +226,15 @@ function pathSegment(segment: unknown): string | number {
 }
 
 /**
- * The field path, the rule it failed, and — for a range — the BOUND it failed against.
+ * The field path, the rule it failed, and the BOUND it failed against if it is a range.
  *
  * Never the rejected value, and never the schema's internals. All six donors carry a version of
  * that comment; what none of them carries is the proof, so here it is: handing the validator's
- * issues straight to the client ships back the caller's own key names (`keys`), the enum's
- * allowed values (`values`), the validator's English sentence and the expected type
- * (`origin`) — four disclosures from one convenience, and two repos in the fleet do it today.
- * An audit note written against an older validator looks for `received`, which the current one
- * no longer emits; the projection is an allow-list precisely so a rename cannot reopen this.
+ * issues straight to the client ships back the caller's own key names (`keys`), the enum's allowed
+ * values (`values`), the validator's English sentence and the expected type (`origin`): four
+ * disclosures from one convenience, and two repos in the fleet do it today. An audit note written
+ * against an older validator looks for `received`, which the current one no longer emits; the
+ * projection is an allow-list precisely so a rename cannot reopen this.
  *
  * The bound is the exception, and it belongs to the caller: it is the published contract, and
  * a `too_big` without it costs somebody a bisect to rediscover a number our own docs state.
@@ -276,10 +274,10 @@ const DEFAULT_MASKED = ["INTERNAL_ERROR"];
 /**
  * Binds the mask policy and the two canned bodies, and returns the function that answers.
  *
- * Bound once, at the app's edge, because the alternative is what the reading found: four places
- * in one fleet deciding the mask separately, and the one furthest from the API getting it
- * wrong. Every other door — a tool wrapper, a worker's health port — imports the same bound
- * function and cannot disagree with the API about what a refusal looks like.
+ * Bound once, at the app's edge, because the alternative is what the reading found: four places in
+ * one fleet deciding the mask separately, and the one furthest from the API getting it wrong. Every
+ * other caller, such as a tool wrapper or a worker's health port, imports the same bound function
+ * and cannot disagree with the API about what a refusal looks like.
  *
  * ```ts
  * export const errorResponse = createErrorResponse<ErrorCode, MessageKey>({

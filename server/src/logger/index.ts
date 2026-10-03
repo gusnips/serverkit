@@ -41,15 +41,15 @@ export interface LoggerOptions {
    * and a Worker writes `createLogger({ level: env.LOG_LEVEL })` from its handler argument.
    *
    * Typed `string` on purpose, so passing `process.env.LOG_LEVEL` needs no cast. An unrecognized
-   * value throws — see `resolveThreshold`.
+   * value throws. See `resolveThreshold`.
    */
   level?: string | undefined;
   /**
    * Where a finished line goes. Defaults to the console, `error`/`warn` to stderr.
    *
-   * This is a seam, not a transport — the package ships none. It exists because one backend in
-   * the fleet needs the line twice (stdout and a batched exporter it flushes on SIGTERM), and
-   * because without it every test of anything that logs has to monkey-patch a global.
+   * This only passes the line to your writer; the package ships no transport. It exists because one
+   * backend in the fleet needs the line twice (stdout and a batched exporter it flushes on
+   * SIGTERM), and because without it every test of anything that logs has to monkey-patch a global.
    */
   write?: (line: string, level: LogLevel) => void;
   /**

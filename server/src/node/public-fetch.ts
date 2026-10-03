@@ -50,8 +50,8 @@ export interface ResolveOptions {
  * with one public and one private record is refused as a whole, so every address that comes back
  * is equally safe to dial.
  *
- * A name DNS does not know is `unresolvable`. A lookup that FAILED — the resolver timed out, or
- * is down — throws, because telling a customer their host does not exist when ours is what broke
+ * A name DNS does not know is `unresolvable`. A lookup that FAILED because the resolver timed out
+ * or is down throws, because telling a customer their host does not exist when ours is what broke
  * is the wrong cause. An aborted `signal` throws its reason, the way `fetch` does.
  */
 export async function resolvePublic(

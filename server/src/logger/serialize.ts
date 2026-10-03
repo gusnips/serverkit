@@ -5,7 +5,7 @@
  * Six backends shipped the same replacer, and it copied **every own enumerable property** off a
  * caught Error into the log line. The comment beside the loop said it was there to pick up a
  * Postgres `code`/`detail`/`hint`. What it actually picked up was whatever the SDK that threw had
- * hung on the error — which for two vendors in use is the request the caller sent us.
+ * hung on the error. For two vendors in use, that includes the request the caller sent us.
  */
 
 /**
@@ -86,10 +86,10 @@ function keptValue(key: string, value: unknown): unknown {
  *
  * The allow-list above is written against Errors, and until this the narrowing stopped there: an
  * Error was filtered and whatever sat in its `cause` was copied whole. That gap is not theoretical
- * here, it is this package's own doing — `errorBoundary` turns every non-Error throw into
- * `new Error(toMessage(err), { cause: err })`, because Hono's `onError` never sees a non-Error and
- * a PostgREST client rejects with plain objects. So in a Hono app the cause slot is precisely where
- * a vendor's rejection object ends up, and a leak there reads as if the list had run.
+ * here, it is this package's own doing: `errorBoundary` turns every non-Error throw into `new
+ * Error(toMessage(err), { cause: err })`, because Hono's `onError` never sees a non-Error and a
+ * PostgREST client rejects with plain objects. So in a Hono app the cause slot is precisely where a
+ * vendor's rejection object ends up, and a leak there reads as if the list had run.
  *
  * A plain object passed directly as `meta.error` is the other door. Hono wraps it, but a worker,
  * a fire-and-forget catch or a database client outside Hono does not. `error` is the raw-error slot
@@ -99,13 +99,13 @@ function keptValue(key: string, value: unknown): unknown {
  *
  * `stack` is here because an adopter's queue found it missing. A job that dies is stored by its
  * queue through a serializer, so the error reaching the dead-letter handler is a plain object with
- * its stack in a string — and that stack is the whole of the "why" in a line whose job is to say
- * which job died and why. The Error branch below has always written `stack` unfiltered; leaving it
- * out here was an asymmetry, not a decision. It is a conventional field name, not one an SDK hangs
- * its own inputs off, which is what the allow-list exists to stop.
+ * its stack in a string. That stack is the whole of the "why" in a line whose job is to say which
+ * job died and why. The Error branch below has always written `stack` unfiltered; leaving it out
+ * here was an asymmetry, not a decision. It is a conventional field name, not one an SDK hangs its
+ * own inputs off, which is what the allow-list exists to stop.
  *
  * Deliberate state it does NOT keep: context an app attaches on purpose. That belongs in the
- * logger's `meta`, which is untouched — `cause` is not the place for it, and one incident of a
+ * logger's `meta`, which is untouched. `cause` is not the place for it, and one incident of a
  * vendor's request body in the log outweighs a field nobody put there deliberately.
  */
 export function narrowErrorLike(value: object): Record<string, unknown> {
@@ -147,8 +147,7 @@ function narrowCause(cause: unknown, seen: WeakSet<object>): unknown {
  * A `JSON.stringify` replacer that keeps log lines useful and crash-proof:
  *
  * - Errors serialize to a readable object. `message` and `stack` are non-enumerable, so a plain
- *   `JSON.stringify(err)` is `{}` — which is how a logger ends up printing nothing about the
- *   failure it was called to report. They are added explicitly, and the allow-listed extras ride
+ *   `JSON.stringify(err)` is `{}`, leaving a logger with nothing to print about the failure it was called to report. They are added explicitly, and the allow-listed extras ride
  *   along beside them.
  * - A plain object in the root `error` slot is narrowed through the same allow-list. Hono's
  *   boundary turns one into an Error cause, but workers and swallowed catches log it directly.
@@ -156,8 +155,7 @@ function narrowCause(cause: unknown, seen: WeakSet<object>): unknown {
  * - A nested `cause` is followed, and so is an `AggregateError`'s `errors`. Both are
  *   non-enumerable, so both are invisible to the loop above; without this line "all attempts
  *   failed" is the whole log entry. Each one goes back through this replacer, so the allow-list
- *   covers the chain, not just the top — and a cause that is not an Error is narrowed here
- *   instead, by {@link narrowErrorLike}, because the replacer's Error branch would never see it.
+ *   covers the chain, not just the top. A cause that is not an Error is narrowed here instead, by {@link narrowErrorLike}, because the replacer's Error branch would never see it.
  * - bigints stringify instead of throwing.
  * - Circular references collapse to "[Circular]" instead of crashing the log call.
  *
@@ -166,14 +164,14 @@ function narrowCause(cause: unknown, seen: WeakSet<object>): unknown {
  *
  * One ordering fact decides what this replacer would otherwise see: `JSON.stringify` calls a
  * value's own `toJSON()` **before** the replacer, so an error class that defines one arrives here
- * already turned into whatever that method returns — the stack and the cause gone, and the result
- * usually shaped for the WIRE, because that is what an error's `toJSON()` is for. Seven backends
- * on this stack define one, and `logger.error("x", { error: appErr })` wrote
- * `{"error":{"error":{…}}}` in every one of them: double-nested, no stack, no cause, and
- * invisible, because the line still looks like a log line.
+ * already turned into whatever that method returns, with the stack and the cause gone, and the
+ * result usually shaped for the WIRE, because that is what an error's `toJSON()` is for. Seven
+ * backends on this stack define one, and `logger.error("x", { error: appErr })` wrote
+ * `{"error":{"error":{…}}}` in every one of them: double-nested, no stack, no cause, and invisible,
+ * because the line still looks like a log line.
  *
  * The original is still there. `JSON.stringify` calls the replacer with the HOLDER as `this`, and
- * the holder's own property is the untouched value — so `this[key]` recovers the Error that
+ * the holder's own property is the untouched value, so `this[key]` recovers the Error that
  * `toJSON()` replaced. That is why this is a `function` and not an arrow.
  *
  * What a log line keeps off an Error is this file's decision, not the error's: an error class is
