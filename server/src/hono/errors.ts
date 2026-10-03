@@ -16,10 +16,10 @@ type CodeOf<E extends ErrorEnv> = NonNullable<E["Variables"]["errorCode"]>;
 /**
  * Turns a thrown non-`Error` into an `Error`, so it reaches `onError`.
  *
- * Hono hands `onError` only what is `instanceof Error`. Anything else is rethrown past every
- * layer and escapes as an unhandled rejection: no answer, a dropped connection, and a browser that
- * reports it as a CORS failure — which sends whoever reads it to the wrong layer. A PostgREST
- * client rejects with plain objects, so this is not hypothetical. The original rides as `cause`.
+ * Hono hands `onError` only what is `instanceof Error`. Anything else is rethrown past every layer
+ * and escapes as an unhandled rejection: no answer, a dropped connection, and a browser that
+ * reports it as a CORS failure, sending whoever reads it to the wrong layer. A PostgREST client
+ * rejects with plain objects, so this is not hypothetical. The original rides as `cause`.
  *
  * Mount it after `requestLogger`, `apiSecureHeaders` and `corsAllowList`. A middleware inside the
  * boundary that writes headers once the route has answered, as `secureHeaders` does, never gets to

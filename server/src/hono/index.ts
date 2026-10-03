@@ -11,7 +11,7 @@
  * `ok`, `created`, `paginated` and `noContent` are the success half: they take the `Context` and
  * put the envelope on the wire, so no route has to unwrap the `{ status, body }` answer that the
  * framework-free builders return. Three adopters wrote them by hand and one got that unwrap wrong
- * in production — see `responses.ts` beside this file.
+ * in production. See `responses.ts` beside this file.
  *
  * and, in a test of the real app, `assertEveryRouteGuarded(app, { isPublic })`, with the rule the
  * app itself uses for what anyone may call.

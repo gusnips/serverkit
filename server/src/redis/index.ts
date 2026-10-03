@@ -13,8 +13,8 @@
  * by an adopter who imports the thing that uses it.
  *
  * The connection factory this replaces was BYTE-IDENTICAL in the four backends it came from,
- * comment included — and one of those comments says, out loud, that it was copied from a sibling
- * repo. Including the part of the comment that was wrong: see `onError`.
+ * comment included. One of those comments says, out loud, that it was copied from a sibling repo.
+ * Including the part of the comment that was wrong: see `onError`.
  */
 import IORedis, { type RedisOptions } from "ioredis";
 
@@ -23,22 +23,22 @@ export type { RedisWindowStoreOptions, WindowPipeline } from "./window-store.ts"
 
 export interface CreateRedisOptions extends RedisOptions {
   /**
-   * `REDIS_URL`. Omit it to connect from the other options instead — `host`, `port`, `db`,
-   * `username`, `password` — which is how three backends in this fleet configure theirs.
+   * `REDIS_URL`. Omit it to connect from `host`, `port`, `db`, `username` and `password` instead,
+   * as three backends in this fleet do.
    */
   url?: string;
   /**
    * Required, because without it a failed connect leaves the app's log silent and prints an
    * unstructured stack to stderr instead.
    *
-   * **The reason four backends give for this is wrong, and it was measured rather than
-   * reasoned.** All four say an EventEmitter with no `error` listener throws, so a Redis blip
-   * becomes a process exit through the `uncaughtException` handler a backend installs for crash
-   * visibility. That rule is true of an EventEmitter and false of ioredis: `silentEmit` in
-   * `Redis.js` checks `this.listeners(eventName).length` and, finding none, calls
-   * `console.error("[ioredis] Unhandled error event:", ...)` and returns — it never emits, so
-   * Node's throw is unreachable. Measured on ioredis 5.10.1 (what the whole fleet runs) under
-   * both bun 1.3.8 and node 22: the process survives and `uncaughtException` never fires.
+   * **The reason four backends give for this is wrong, and it was measured rather than reasoned.**
+   * All four say an EventEmitter with no `error` listener throws, so a Redis blip becomes a process
+   * exit through the `uncaughtException` handler a backend installs for crash visibility. That rule
+   * is true of an EventEmitter and false of ioredis: `silentEmit` in `Redis.js` checks
+   * `this.listeners(eventName).length` and, finding none, calls `console.error("[ioredis] Unhandled
+   * error event:", ...)` and returns. It never emits, so Node's throw is unreachable. Measured on
+   * ioredis 5.10.1 (what the whole fleet runs) under both bun 1.3.8 and node 22: the process
+   * survives and `uncaughtException` never fires.
    *
    * It stays required for the reason that survives. That `console.error` is a bare stack on
    * stderr, outside whatever logger the app ships its other failures through, and `silentEmit`
@@ -58,25 +58,25 @@ export interface CreateRedisOptions extends RedisOptions {
  *
  * **`maxRetriesPerRequest: null` is the default, and it is the opposite kind of default from
  * `createPgPool`'s.** There the default makes an unbounded wait bounded; here it makes commands
- * wait FOREVER, because BullMQ requires it — its blocking reads must never be cut short by a
- * retry limit. That is not a mistake and every copy in this fleet sets it, but it has a
- * consequence worth stating once instead of rediscovering:
+ * wait FOREVER, because BullMQ requires blocking reads that are never cut short by a retry limit.
+ * That is not a mistake and every copy in this fleet sets it, but it has a consequence worth
+ * stating once instead of rediscovering:
  *
- * **Every read on this connection must carry its own bound.** A `ping`, a cache lookup, a
- * limiter check, a `queue.add()` — with Redis down, each waits indefinitely rather than
- * failing. {@link pingRedis} is the worked example. An `add()` needs more than a bound: a timer
- * ends the request, and the job is still added once Redis comes back (measured, 35 seconds down),
- * so check `status === "ready"` before adding. One backend in this fleet enqueues inbound
- * webhooks on a connection like this with nothing bounding the enqueue, so during a Redis outage
- * each webhook holds its HTTP connection until the caller gives up, and its `/health` — which
- * probes Postgres only — stays green throughout.
+ * **Every read on this connection must carry its own bound.** A `ping`, a cache lookup, a limiter
+ * check or a `queue.add()` waits indefinitely rather than failing while Redis is down. {@link
+ * pingRedis} is the worked example. An `add()` needs more than a bound: a timer ends the request,
+ * and the job is still added once Redis comes back (measured, 35 seconds down), so check `status
+ * === "ready"` before adding. One backend in this fleet enqueues inbound webhooks on a connection
+ * like this with nothing bounding the enqueue, so during a Redis outage each webhook holds its HTTP
+ * connection until the caller gives up, and its `/health`, which probes Postgres only, stays green
+ * throughout.
  *
  * Pass `maxRetriesPerRequest: 3` for a connection that serves ordinary commands rather than
  * BullMQ's blocking ones. Everything else is `RedisOptions`, passed straight through.
  *
- * The client is NOT a singleton here. Every copy in the fleet wrapped one in a module-level
- * `let`, and that is the app's lifecycle to own — a package that holds it decides when your
- * process can exit.
+ * The client is NOT a singleton here. Every copy in the fleet wrapped one in a module-level `let`,
+ * and that is the app's lifecycle to own. A package that holds it decides when your process can
+ * exit.
  */
 export function createRedis({ url, onError, ...options }: CreateRedisOptions): IORedis {
   if (url) refuseQueryOptions(url);
@@ -119,14 +119,14 @@ export interface RedisPingOptions {
  * the dependency by name.
  *
  * **The bound is doing real work here, more than it is for Postgres.** The connection above is
- * deliberately unbounded (see {@link createRedis}), so an unbounded `ping()` on it never
- * returns while Redis is down — it does not fail, it waits. Four backends in this fleet bound it
- * exactly this way and are safe only because of it; **all four then forgot to clear the timer**,
- * which leaves a pending 2s timer per health check in a process something probes every few
- * seconds. This clears it in a `finally`.
+ * deliberately unbounded (see {@link createRedis}), so an unbounded `ping()` on it never returns
+ * while Redis is down. It does not fail, it waits. Four backends in this fleet bound it exactly
+ * this way and are safe only because of it; **all four then forgot to clear the timer**, which
+ * leaves a pending 2s timer per health check in a process something probes every few seconds. This
+ * clears it in a `finally`.
  *
- * The race leaks the `PING` itself — it stays outstanding on the connection. For a `PING` that
- * is free, and the alternative costs more than the thing it protects.
+ * The race leaves the `PING` itself outstanding on the connection. For a `PING` that is free, and
+ * the alternative costs more than the thing it protects.
  */
 export async function pingRedis(
   /** Structural rather than `IORedis`, so this says what it needs and a test can hand it a stub. */
@@ -155,18 +155,18 @@ export async function pingRedis(
 
 export interface AssertRedisOptions extends RedisPingOptions {
   /**
-   * The connection string, used only to name the HOST in the error — never its password, which
-   * is why this takes the URL and parses it rather than taking a string to interpolate.
+   * The connection string, used only to name the HOST in the error, never its password. That is why
+   * this takes the URL and parses it rather than taking a string to interpolate.
    */
   url?: string;
   /**
    * One sentence appended to the message: what to DO about it, here.
    *
-   * The generic half of this error states what failed and its likely cause, and a package can
-   * know no more than that. The fix is local — "start it (the dev compose runs one)" names a
-   * command that exists in one repo and not the next. Three backends wrote this gate; two said
-   * "check REDIS_URL" and the third named the tool that starts one, and the third is the only
-   * message a reader can act on without knowing the repo already.
+   * The generic half of this error states what failed and its likely cause, and a package can know
+   * no more than that. The fix is local: "start it (the dev compose runs one)" names a command that
+   * exists in one repo and not the next. Three backends wrote this gate; two said "check REDIS_URL"
+   * and the third named the tool that starts one, and the third is the only message a reader can
+   * act on without knowing the repo already.
    */
   hint?: string;
 }
@@ -175,8 +175,8 @@ export interface AssertRedisOptions extends RedisPingOptions {
  * Boot gate: a process whose queues can never connect must not sit there looking healthy.
  *
  * Three backends in this fleet call this from a worker's entry point, before it starts consuming.
- * Without it the worker boots, reports itself up, and quietly consumes nothing — which looks
- * exactly like an empty queue.
+ * Without it the worker boots, reports itself up, and quietly consumes nothing, which looks exactly
+ * like an empty queue.
  *
  * The default here is longer than {@link pingRedis}'s on purpose: a readiness probe runs every
  * few seconds and wants a fast answer, where a boot gate runs once against a Redis that may
@@ -202,11 +202,11 @@ export interface QuitRedisOptions {
  * Shutdown: a bounded `QUIT`, then the socket closed whatever happened. Never throws.
  *
  * **A bare `quit()` can hold a drain until the process manager kills it, two ways.** With Redis
- * unreachable and a command waiting in ioredis's offline queue — the `PING` a health probe gave up
- * on — `quit()` resolves only once that queue is empty, and it never empties. And with Redis
- * frozen rather than gone, a paused process or a stalled VM, the socket stays open and `QUIT` is
- * never answered. Either way every step after it, Postgres included, never runs. Two backends in
- * the fleet found it on the same day; both had `quit().catch(() => disconnect())`, which catches a
+ * unreachable and a command waiting in ioredis's offline queue (the `PING` a health probe gave up
+ * on), `quit()` resolves only once that queue is empty, and it never empties. And with Redis frozen
+ * rather than gone, a paused process or a stalled VM, the socket stays open and `QUIT` is never
+ * answered. Either way every step after it, Postgres included, never runs. Two backends in the
+ * fleet found it on the same day; both had `quit().catch(() => disconnect())`, which catches a
  * rejection and not a hang.
  *
  * A connection that is not ready has nothing to flush, so it closes at once.

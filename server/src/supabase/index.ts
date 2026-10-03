@@ -19,52 +19,51 @@ function statusOf(error: unknown): number {
 /**
  * Did auth FAIL to answer, rather than answer "no"?
  *
- * Only answering "no" ends a session. Every client in this fleet reads a 401 as a dead session
- * and signs the person out, so a 401 has to mean Supabase looked at the token and refused it.
- * Answer an outage with a 401 and one bad minute at auth signs out everybody who was signed in —
- * while the refresh they are all waiting on is still in flight.
+ * Only answering "no" ends a session. Every client in this fleet reads a 401 as a dead session and
+ * signs the person out, so a 401 has to mean Supabase looked at the token and refused it. Answer an
+ * outage with a 401 and one bad minute at auth signs out everybody who was signed in, while the
+ * refresh they are all waiting on is still in flight.
  *
  * **Both clauses, and the second is the load-bearing one.** `isAuthRetryableFetchError` reads a
  * list the vendor owns and has rewritten more than once: `[502, 503, 504]` at auth-js 2.91, and
- * `[500-504, 520-530]` at auth-js 2.113.0, unchanged at the 2.116.0 this package develops
- * against. The usual argument for keeping a check of our own is that drift — and it invites the
- * obvious reply, "then pin a recent version and drop the clause".
+ * `[500-504, 520-530]` at auth-js 2.113.0, unchanged at the 2.116.0 this package develops against.
+ * The usual argument for keeping a check of our own is that drift. It invites the obvious reply,
+ * "then pin a recent version and drop the clause".
  *
- * The argument that survives the reply: it is a LIST, not a range, so it has holes at every
- * version ever shipped. Nothing for 505 through 519, nothing from 531 up. A 507 or a 599 out of
- * a proxy in front of GoTrue arrives as a plain `AuthApiError`, and the vendor's predicate
- * answers false for it — at every version, not just at the stale one.
+ * The argument that survives the reply: it is a LIST, not a range, so it has holes at every version
+ * ever shipped. Nothing for 505 through 519, nothing from 531 up. A 507 or a 599 out of a proxy in
+ * front of GoTrue arrives as a plain `AuthApiError`, and the vendor's predicate answers false for
+ * it at every version, not just at the stale one.
  *
  * Do not trust the numbers in this paragraph; re-measure them. The list lives in auth-js's
  * `lib/fetch.js` as `NETWORK_ERROR_CODES`, and `bun why @supabase/supabase-js` tells you which
  * version you actually resolve. The test beside this file asserts the CLAIM rather than the
- * numbers — a 507 that the vendor refuses and this predicate catches — so it goes red the day the
- * holes are gone and this paragraph needs rewriting, which is the only kind of version comment
- * that can be trusted. Twelve backends wrote this predicate and ten of them carried a
- * version sentence inline; three of those sentences had gone false by the time anyone re-read
- * them, and one of the three carried no number at all, which is how it escaped a gate written to
- * catch the other two. This is the copy that gets to be wrong, because it is the only one.
+ * numbers: a 507 that the vendor refuses and this predicate catches. It goes red the day the holes
+ * are gone and this paragraph needs rewriting, which is the only kind of version comment that can
+ * be trusted. Twelve backends wrote this predicate and ten of them carried a version sentence
+ * inline; three of those sentences had gone false by the time anyone re-read them, and one of the
+ * three carried no number at all, which is how it escaped a gate written to catch the other two.
+ * This is the copy that gets to be wrong, because it is the only one.
  *
  * **One shape this cannot catch, measured rather than reasoned about.** When the body does not
- * parse as JSON AND the status is not on the list, auth-js raises `AuthUnknownError`, which
- * carries the parse error and **a `status` property that is present and `undefined`** — the base
- * `AuthError` defines the field, and this subclass never fills it (`lib/fetch.js` builds it,
- * `lib/errors.js` defines it; checked at 2.114.0 and 2.116.0). Present-and-undefined is worse
- * than absent: `"status" in error` answers true and tells you nothing, which is why `statusOf`
- * above narrows on `typeof === "number"` instead. So a 507 from a proxy answering HTML is
- * indistinguishable here from a malformed 400, and this answers false for both. Widening on the
- * class name is tempting and was declined: `AuthUnknownError` is raised at ANY status, so it
- * would call that malformed 400 an outage too — and a dead session that reads as retryable is
- * the same failure from the other side, where nobody is signed out and nobody can sign in
- * either. The test below pins the `false`, so choosing otherwise is something somebody does on
- * purpose.
+ * parse as JSON AND the status is not on the list, auth-js raises `AuthUnknownError`, which carries
+ * the parse error and **a `status` property that is present and `undefined`**. The base `AuthError`
+ * defines the field, and this subclass never fills it (`lib/fetch.js` builds it, `lib/errors.js`
+ * defines it; checked at 2.114.0 and 2.116.0). Present-and-undefined is worse than absent:
+ * `"status" in error` answers true and tells you nothing, which is why `statusOf` above narrows on
+ * `typeof === "number"` instead. So a 507 from a proxy answering HTML is indistinguishable here
+ * from a malformed 400, and this answers false for both. Widening on the class name is tempting and
+ * was declined: `AuthUnknownError` is raised at ANY status, so it would call that malformed 400 an
+ * outage too. A dead session that reads as retryable is the same failure from the other side, where
+ * nobody is signed out and nobody can sign in either. The test below pins the `false`, so choosing
+ * otherwise is something somebody does on purpose.
  *
- * `unknown` rather than `AuthError`, because the fleet asks this from three shapes and only one
- * of them is narrowed: the door holds `AuthError | null` straight off `getUser`, and the `catch`
- * around the user lookup holds whatever was thrown. The vendor's own predicate is
- * `(error: unknown)` and duck-types on `__isAuthError` plus `name` — so it answers false for
- * `null`, a number, a string, a bare `{}` and an ordinary `Error`. Measured, not
- * assumed; the duck-typing is also why it still works when two copies of the SDK are installed.
+ * `unknown` rather than `AuthError`, because the fleet asks this from three shapes and only one of
+ * them is narrowed: the door holds `AuthError | null` straight off `getUser`, and the `catch`
+ * around the user lookup holds whatever was thrown. The vendor's own predicate is `(error:
+ * unknown)` and duck-types on `__isAuthError` plus `name`, so it answers false for `null`, a
+ * number, a string, a bare `{}` and an ordinary `Error`. Measured, not assumed; the duck-typing is
+ * also why it still works when two copies of the SDK are installed.
  */
 export function isAuthOutage(error: unknown): boolean {
   return isAuthRetryableFetchError(error) || statusOf(error) >= 500;

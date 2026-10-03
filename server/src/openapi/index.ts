@@ -4,8 +4,7 @@
  *
  * Five backends each wrote one, and the same few things went wrong in them:
  * - **The server is the public origin, never the request's.** Four of five built `servers` from
- *   the request's URL, and behind a reverse proxy every request arrives on the loopback — so the
- *   published reference sent every "Try it", every generated client and every agent reading it to
+ *   the request's URL, and behind a reverse proxy every request arrives on the loopback, so the published reference sent every "Try it", every generated client and every agent reading it to
  *   `http://127.0.0.1:<port>`. The fifth wrote its production origin by hand, and was the only one
  *   right in production. `origin` is required and comes from config.
  * - **The server and the path together are the route.** One named no `/v1` anywhere while every
@@ -14,8 +13,7 @@
  * - **An operation id names one operation.** One tool mounted on five paths published one id five
  *   times, and a generator keeps one of the five. A repeated id throws here.
  * - **Translate prose, not data.** The walk that localizes `summary` and `description` must not
- *   enter an example, a default or an enum — a response example with a field called
- *   `description` would ship translated — and a field NAMED `example` under `properties` is still
+ *   enter an example, a default or an enum: a response example with a field called `description` would ship translated. A field NAMED `example` under `properties` is still
  *   a schema to walk. See `translateProse`.
  *
  * Schemas are any Standard JSON Schema (zod 4.4 and later, and the other libraries that implement
@@ -609,8 +607,8 @@ const NAME_KEYS = new Set(["properties", "patternProperties", "responses", "cont
 
 export interface TranslateOptions {
   /**
-   * `x-` fields whose value is a sentence someone reads, such as `["x-credits"]` when it says
-   * "1 credit per page". Every other `x-` field is data — a scope name, an SDK method — and a
+   * `x-` fields whose value is a sentence someone reads, such as `["x-credits"]` when it says "1
+   * credit per page". Every other `x-` field is data, such as a scope name or an SDK method. A
    * collector listing it would ask a translator for a word the API matches on.
    */
   proseExtensions?: readonly `x-${string}`[];

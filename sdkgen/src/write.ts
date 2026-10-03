@@ -28,8 +28,8 @@ export interface WriteResult {
 }
 
 /**
- * Formats each file with the prettier config that applies at its path, then writes it — or, with
- * `check`, writes nothing and lists the files that would change.
+ * Formats each file with the prettier config that applies at its path, then writes it. With
+ * `check`, it writes nothing and lists the files that would change.
  *
  * ```ts
  * const { stale } = await writeGenerated(files, { root, check: process.argv.includes("--check") });
