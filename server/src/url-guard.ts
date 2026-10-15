@@ -26,6 +26,8 @@ export type UrlRefusalReason =
   | "port"
   /** A name that only means something inside a network: `localhost`, `redis`, `*.internal`. */
   | "internal-name"
+  /** The host, or a parent domain of it, is in the policy's `blockedHosts`. */
+  | "blocked-host"
   /** The host is, or resolves to, an address that is not public. */
   | "private-address"
   /** DNS knows no such host. Only `/node` resolves, so only `/node` answers this. */
@@ -54,6 +56,16 @@ export interface UrlPolicy {
    * scheme alone, so a receiver at `http://localhost:4000/` also needs `schemes: ["http:", "https:"]`.
    */
   allowLoopback?: boolean;
+  /**
+   * Public domains this caller must not dial, for a reason that is the caller's and not the
+   * network's: another service already owns that source. An entry blocks the host and every
+   * subdomain of it, so `example.com` refuses `www.example.com` and leaves `notexample.com` alone.
+   * Case and a trailing dot do not matter. Write an entry as a bare hostname, an internationalized
+   * one in its punycode form (what `new URL` gives). It is checked on the first URL and on every
+   * redirect hop, before anything resolves or connects, so a redirect cannot reach a host the
+   * first URL could not. Default none.
+   */
+  blockedHosts?: readonly string[];
 }
 
 export interface UrlShape {
@@ -115,6 +127,7 @@ export function checkUrlShape(raw: string | URL, policy: UrlPolicy = {}): UrlSha
   if (ports !== "any" && !ports.includes(portOf(url))) return refuse("port");
 
   const host = unbracket(url.hostname);
+  if (isBlockedHost(host, policy.blockedHosts)) return refuse("blocked-host");
   if (isInternalHostname(host) && !(policy.allowLoopback && isLoopbackName(normalizeName(host))))
     return refuse("internal-name");
   if (parseIpv4(host) === null && ipv6Groups(host) === null)
@@ -220,6 +233,14 @@ function refuse(reason: UrlRefusalReason): UrlRefusal {
 /** A trailing dot is the same host: `localhost.` is localhost. */
 function normalizeName(host: string): string {
   return unbracket(host).toLowerCase().replace(/\.+$/, "");
+}
+
+function isBlockedHost(host: string, blocked: readonly string[] = []): boolean {
+  const name = normalizeName(host);
+  return blocked.some((entry) => {
+    const blockedName = normalizeName(entry);
+    return name === blockedName || name.endsWith(`.${blockedName}`);
+  });
 }
 
 function isLoopbackName(name: string): boolean {

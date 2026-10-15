@@ -957,7 +957,7 @@ checkUrlShape("https://169.254.169.254/latest/meta-data/");
 ```
 
 It answers with a result, not a throw, so the 400 is in your words. The reasons are `invalid`,
-`scheme`, `credentials`, `port`, `internal-name` and `private-address`.
+`scheme`, `credentials`, `port`, `blocked-host`, `internal-name` and `private-address`.
 
 - **Only `https:` by default.** A reader of pasted links passes
   `{ schemes: ["http:", "https:"] }`.
@@ -968,6 +968,12 @@ It answers with a result, not a throw, so the 400 is in your words. The reasons 
   so a receiver on your machine that speaks plain HTTP also needs `schemes: ["http:", "https:"]`.
   Without it, `http://localhost:4000/` is refused as `scheme`. `fetchPublic` takes the same
   options as `policy`.
+- **`blockedHosts: ["example.com"]`** refuses a public host that your code must not dial, because
+  another service already reads it. It blocks the host and every subdomain (`www.example.com`),
+  and leaves `notexample.com` alone. Case and a trailing dot do not matter, and a URL written
+  with percent-encoding or full-width letters is read the way `new URL` reads it. It runs on the
+  first URL and on every redirect, before a name is resolved, so a short link cannot lead where
+  the first URL could not go. A refusal answers `blocked-host`.
 
 Twelve backends wrote this check. The most-copied version let carrier-grade NAT through, and
 another judged `::ffff:127.0.0.1` safe once the URL parser had rewritten it as `::ffff:7f00:1`.

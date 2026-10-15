@@ -179,6 +179,40 @@ describe("checkUrlShape", () => {
     expect(checkUrlShape(raw)).toEqual({ ok: false, reason });
   });
 
+  it.each([
+    "https://blocked.example/",
+    "https://BLOCKED.Example./",
+    "https://www.blocked.example/page",
+    "https://a.b.blocked.example./",
+    "https://%62locked.example/", // percent-encoded letter: the URL parser decodes the host
+    "https://blocked。example/", // ideographic full stop: the URL parser reads it as a dot
+    "https://ｂｌｏｃｋｅｄ.example/", // full-width letters
+    "https://blocked.example:8443/",
+  ])("refuses a blocked host and its subdomains: %s", (raw) => {
+    const policy = { blockedHosts: ["elsewhere.example", "Blocked.Example."] };
+    expect(checkUrlShape(raw, policy)).toEqual({ ok: false, reason: "blocked-host" });
+  });
+
+  it.each([
+    "https://notblocked.example/",
+    "https://blocked.example.test/",
+    "https://blocked-example/",
+    "https://other.test/blocked.example?next=https://blocked.example/",
+    "https://user@other.test/#blocked.example",
+  ])("matches a whole hostname only, never part of %s", (raw) => {
+    const policy = { blockedHosts: ["blocked.example"], credentials: "allow" } as const;
+    expect(checkUrlShape(raw, policy)).toEqual(checkUrlShape(raw, { credentials: "allow" }));
+  });
+
+  it("blocks no host unless the policy names it", () => {
+    const raw = "https://www.blocked.example/";
+    expect(checkUrlShape(raw)).toMatchObject({ ok: true });
+    expect(checkUrlShape(raw, { blockedHosts: [] })).toMatchObject({ ok: true });
+    expect(checkUrlShape(raw, { blockedHosts: ["media.blocked.example"] })).toMatchObject({
+      ok: true,
+    });
+  });
+
   it("takes http only when the policy says so", () => {
     expect(checkUrlShape("http://example.com", both)).toMatchObject({ ok: true });
   });
@@ -295,6 +329,17 @@ describe("nextHop", () => {
   it("counts a port change as another origin", () => {
     const hop = nextHop(from, answer(307, "https://api.example.com:8443/x"), post());
     expect(hop?.ok && hop.headers.has("authorization")).toBe(false);
+  });
+
+  it.each([301, 302, 303, 307, 308])("refuses a blocked host on a %s redirect", (status) => {
+    const policy = { blockedHosts: ["blocked.example"] };
+    expect(nextHop(from, answer(status, "//CDN.Blocked.Example./next"), post(), policy)).toEqual({
+      ok: false,
+      reason: "blocked-host",
+    });
+    expect(nextHop(from, answer(status, "//cdn.example.net/next"), post(), policy)).toMatchObject({
+      ok: true,
+    });
   });
 
   it("checks where the redirect goes like the first URL", () => {

@@ -598,6 +598,10 @@ Unhandled error event:", ...)` and returns — it never emits, so Node's throw i
     private answer among public ones is refused as a whole, which is what makes every surviving
     address equally safe to dial. `allowLoopback` relaxes loopback and nothing else, because two
     donors had a flag that skipped the whole guard and nothing refused it in production.
+    `blockedHosts` is a caller's own wall around a public host, and it lives in `checkUrlShape`
+    for the same reason the rest does: `resolvePublic` and `nextHop` both run it, so the first
+    URL and each redirect refuse it before a name resolves. A check that ran only on the first
+    URL would be the "follow, then check the end" mistake again.
 
 34. **The pinned dial rests on a runtime fact, and Bun 1.3.8 gets it wrong.** It sends to the IP
     literal and puts the name in `servername` and in `Host`. Measured with a local CA and against

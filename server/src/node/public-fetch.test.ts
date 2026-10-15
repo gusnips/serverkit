@@ -60,6 +60,7 @@ const routes: Record<string, (res: ServerResponse) => void> = {
   "/half": (res) => res.write("first"),
   "/reset": (res) => res.socket?.destroy(),
   "/to-other": (res) => redirect(res, 302, `http://other.example.test:${port}/landed`),
+  "/chain": (res) => redirect(res, 307, "/to-other"),
   "/to-self": (res) => redirect(res, 302, "/to-self"),
   "/to-metadata": (res) => redirect(res, 302, "http://169.254.169.254/latest/meta-data/"),
   "/to-internal": (res) => redirect(res, 302, `http://internal.example.test:${port}/`),
@@ -393,6 +394,46 @@ describe("fetchPublic", () => {
       const result = await fetchPublic(base(path), { policy: local, resolve, signal: seconds(2) });
       expect(result).toEqual({ ok: false, reason: "private-address" });
     }
+  });
+
+  it("refuses a blocked first host before resolving or sending anything", async () => {
+    const result = await fetchPublic(base("/hello"), {
+      policy: { ...local, blockedHosts: ["Hooks.Example.Test."] },
+      resolve,
+      signal: seconds(2),
+    });
+    expect(result).toEqual({ ok: false, reason: "blocked-host" });
+    expect(asked).toEqual([]);
+    expect(seen).toEqual([]);
+  });
+
+  // The hop is refused before its name is resolved and before a byte is sent to it, the same as
+  // the private-address test above: the landing page is never requested.
+  it.each([
+    ["/to-other", 1],
+    ["/chain", 2],
+  ])("refuses a redirect to a blocked host, one or two hops in: %s", async (path, hops) => {
+    const result = await fetchPublic(base(path), {
+      policy: { ...local, blockedHosts: ["other.example.test"] },
+      resolve,
+      signal: seconds(2),
+    });
+    expect(result).toEqual({ ok: false, reason: "blocked-host" });
+    expect(asked).toEqual(Array(hops).fill("hooks.example.test"));
+    expect(seen).toHaveLength(hops);
+    expect(hits("/landed")).toBe(0);
+  });
+
+  it("follows the same redirect when the policy blocks a different host", async () => {
+    const result = await fetchPublic(base("/chain"), {
+      policy: { ...local, blockedHosts: ["tother.example.test", "example.test.evil"] },
+      resolve,
+      signal: seconds(2),
+    });
+    if (!result.ok) throw new Error(`refused: ${result.reason}`);
+    expect(await result.response.text()).toBe("landed");
+    expect(result.redirects).toBe(2);
+    expect(hits("/landed")).toBe(1);
   });
 
   it("follows nothing at maxRedirects 0, and hands the redirect back", async () => {
