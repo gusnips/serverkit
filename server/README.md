@@ -1329,6 +1329,117 @@ eight backends said in a comment that they served both, and answered `/mcp/` wit
 We tested the SDK at 1.29.0 and 1.30.1, and Hono at 4.12.26 and 4.13.8. `@modelcontextprotocol/sdk`
 is an optional peer, behind the `/mcp` subpath, and the subpath imports nothing from Node.
 
+## Signing an agent in
+
+Claude, ChatGPT and Codex can't paste an API key into a header. They connect to your MCP door by
+signing in with OAuth, and both plugin directories refuse a signed-in server without it. `/oauth`
+is that sign-in. The token a client gets back is one of your own API keys, made by your
+`mintKey`, so your key check, your keys page and revoking a key work as they do today.
+
+It also signs in your own scripts on a machine whose browser can't come back to it: a server, a
+container, a chat. The script prints a link and a short code, the person approves on any device,
+and the script's next poll gets the key.
+
+```ts
+import { createOAuth, oauthRoutes } from "@gusnips/server/oauth";
+import { createPgOAuthStore } from "@gusnips/server/pg";
+
+const oauth = createOAuth({
+  issuer: "https://api.example.com",
+  resource: "https://api.example.com/mcp",
+  authorizePage: "https://example.com/oauth/authorize",
+  devicePage: "https://example.com/device",
+  secret: env.OAUTH_SECRET, // 32 random bytes or more, and never changed
+  store: createPgOAuthStore(pool, { table: "app.oauth_grants" }),
+  deviceClients: { "acme-cli": "Acme CLI" },
+  mintKey: async ({ subject, keyName }) => {
+    if (!(await mayHaveKey(subject))) return { refused: "Only admins can connect apps." };
+    return createApiKey(subject, keyName); // the same call your keys page makes
+  },
+});
+
+// A 401 from your door now says where to sign in.
+const errorResponse = createErrorResponse({ internal, validation, challenge: oauth.challenge });
+app.use("/oauth/device_authorization", rateLimit({ store, limit: 10, windowMs: 60_000, ... }));
+app.route("/", oauthRoutes(oauth));
+```
+
+`oauth.challenge` is
+`Bearer resource_metadata="https://api.example.com/.well-known/oauth-protected-resource/mcp"`.
+A client that meets your door without a token reads it and starts the sign-in.
+
+Your web app draws two pages, behind its own sign-in, and reaches `oauth` through two routes of
+your API:
+
+- **The consent page** (`authorizePage`). The client sends the person there with its request in
+  the query string. `describe(query)` says what to show: the app's name, where the code goes, and
+  the name the key gets. `approve(query, userId)` returns `redirectTo`, where the browser goes
+  next. "Cancel" goes to `cancelUrl`. Check that the person may make a key before you call
+  `approve`, so a refusal shows on your page and not inside the client.
+- **The device page** (`devicePage`). The link the script prints carries the code. Show the code
+  from `describeDevice(code)` and ask whether it matches the one on their screen. That question is
+  what stops a link somebody else started. Then `decideDevice(code, { subject: userId })`, or
+  `decideDevice(code, "deny")`.
+
+Both return `{ ok: false, reason, message }` instead of throwing. `reason` is one of
+`unknown-client`, `redirect-mismatch`, `invalid-request`, `wrong-resource` and `unknown-code`;
+word your own page for it, and never redirect on a refusal.
+
+The grants live in one table:
+
+```sql
+CREATE TABLE app.oauth_grants (
+  hash text PRIMARY KEY,
+  kind text NOT NULL CHECK (kind IN ('code', 'device')),
+  client_id text NOT NULL,
+  client_name text NOT NULL,
+  redirect_uri text,
+  code_challenge text,
+  user_code_hash text,
+  subject text,
+  key_name text,
+  status text NOT NULL CHECK (status IN ('pending', 'approved', 'denied', 'used')),
+  expires_at timestamptz NOT NULL,
+  polled_at timestamptz,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX oauth_grants_user_code_idx ON app.oauth_grants (user_code_hash)
+  WHERE status = 'pending';
+CREATE INDEX oauth_grants_expires_at_idx ON app.oauth_grants (expires_at);
+```
+
+- **Only hashes are stored.** A code and a device code are SHA-256 in `hash`, and nothing in the
+  table signs anyone in. Run `oauth.prune()` once a night: it deletes grants that expired more
+  than a day ago.
+- **A client id comes three ways.** An https URL is a client metadata document: fetched, checked
+  and cached for five minutes, which the MCP spec asks for. Anything else is a registration
+  (`POST /oauth/register`) that stores nothing: the id is our signature over the client's name and
+  redirects, so registering costs no row. The third is a name in `deviceClients`.
+- **Only `deviceClients` may start a device sign-in.** A registered client picks its own name, so
+  anyone could start a sign-in called "Claude" and send the link to someone who never asked.
+- **A code works once, within 5 minutes**, with PKCE S256 and a `resource` that must be your
+  door. A device sign-in lasts 10 minutes, the script polls every 5 seconds, a faster poll gets
+  `slow_down`, and the key is handed out once. A user code is 8 letters with no vowels,
+  `WDJB-MJHT`, and is read however it is typed.
+- **A redirect** may be https, http on localhost, or an app's own scheme such as `cursor://`.
+  Never a fragment, and never `javascript:`, `data:` or `file:`.
+- **No expiry and no refresh token.** The key lasts until someone revokes it, like one pasted by
+  hand.
+- **On a server, fetch metadata documents with `fetchPublic`.** The default checks the URL's
+  shape and follows no redirect, which is all a Worker can do. `fetchPublic` from `/node` also
+  refuses a name that resolves to a private address:
+
+  ```ts
+  fetchClientDocument: async (url) => {
+    const got = await fetchPublic(url, { maxRedirects: 0, signal: AbortSignal.timeout(5_000) });
+    return got.ok ? got.response : null;
+  },
+  ```
+
+The client id format matches the first backend that shipped this, byte for byte. claude.ai and
+ChatGPT keep a client id forever, so a new format would disconnect every app already connected.
+`/oauth` imports nothing from Node and runs in a Worker; pass your own store there.
+
 ## A reference for your API
 
 An OpenAPI document is the one file that docs sites, client generators and agents read to learn

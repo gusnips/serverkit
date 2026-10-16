@@ -113,6 +113,12 @@ export interface ErrorResponseOptions<Code extends string, Key extends string> {
    * field: `Failing row contains (someone@example.com, 4242…)`, every column, values included. Measured against a real server, not assumed.
    */
   maskDetails?: boolean;
+  /**
+   * The `WWW-Authenticate` value on a 401. Default `Bearer`. With `/oauth`, pass `oauth.challenge`,
+   * which names where a client learns to sign in (RFC 9728), so Claude or ChatGPT meeting your door
+   * without a token starts the sign-in instead of stopping.
+   */
+  challenge?: string;
 }
 
 /**
@@ -312,7 +318,7 @@ export function createErrorResponse<Code extends string = string, Key extends st
       if (typeof wait === "number") headers["Retry-After"] = String(wait);
       // RFC 6750 §3: a 401 names the scheme it wants. Without it a 401 is a closed door with no
       // handle — which is what an agent, with no human to ask, is left holding.
-      if (err.statusCode === 401) headers["WWW-Authenticate"] = "Bearer";
+      if (err.statusCode === 401) headers["WWW-Authenticate"] = opts.challenge ?? "Bearer";
 
       if (err.statusCode < 500)
         return { status: err.statusCode, body: appErrorBody(err), headers, kind: "client" };

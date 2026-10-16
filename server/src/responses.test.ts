@@ -199,6 +199,16 @@ describe("an AppError under 500 is answered as itself", () => {
     });
   });
 
+  it("names where to sign in on a 401 when given the challenge", () => {
+    const challenge = 'Bearer resource_metadata="https://api.example.com/.well-known/x"';
+    const answer = createErrorResponse<Code>({
+      internal: { code: "INTERNAL_ERROR", message: "Something on our side failed" },
+      validation: { code: "VALIDATION_ERROR", message: "The request could not be read" },
+      challenge,
+    })(appError("UNAUTHORIZED", "Sign in"));
+    expect(answer.headers).toEqual({ "WWW-Authenticate": challenge });
+  });
+
   it("says a refusal does NOT clear by waiting, and sends no Retry-After for it", () => {
     // A concurrency slot frees when another job finishes, and a cap on live objects clears by
     // archiving one. Neither is a wait a server can state, and both are 429s in the fleet.

@@ -171,3 +171,5 @@ export async function pingPool(
 
 export { createIdempotency } from "./idempotency.ts";
 export type { IdempotencyOptions, IdempotencyScope, IdempotentOutcome } from "./idempotency.ts";
+export { createPgOAuthStore } from "./oauth-store.ts";
+export type { PgOAuthStoreOptions } from "./oauth-store.ts";
