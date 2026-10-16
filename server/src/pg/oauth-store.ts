@@ -113,22 +113,25 @@ export function createPgOAuthStore(
       return (rowCount ?? 0) > 0;
     },
 
-    async pollDevice(hash, now) {
+    async pollDevice(hash, clientId, now) {
       // The row is locked while it is read, so two polls of an approved sign-in queue up: the
-      // first marks it used, and the second reads `used` and gets no key.
+      // first marks it used, and the second reads `used` and gets no key. `client_id` is in the
+      // lock's WHERE, so another client's poll finds no row and changes nothing.
       const { rows } = await pool.query<GrantRow>(
         `WITH before AS (
-           SELECT ${COLUMNS} FROM ${table} WHERE hash = $1 AND kind = 'device' FOR UPDATE
+           SELECT ${COLUMNS} FROM ${table}
+            WHERE hash = $1 AND kind = 'device' AND client_id = $2
+              FOR UPDATE
          )
          UPDATE ${table} AS grants
-            SET polled_at = $2,
+            SET polled_at = $3,
                 status = CASE WHEN before.status = 'approved' THEN 'used' ELSE before.status END
            FROM before
           WHERE grants.hash = before.hash
       RETURNING ${COLUMNS.split(", ")
         .map((column) => `before.${column}`)
         .join(", ")}`,
-        [hash, now],
+        [hash, clientId, now],
       );
       return grantOf(rows[0]);
     },

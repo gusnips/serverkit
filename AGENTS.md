@@ -973,7 +973,7 @@ Unhandled error event:", ...)` and returns — it never emits, so Node's throw i
     sends it, and not on 402, which no raise in the fleet sends it on. All 42 planted defects were
     caught, with a green control.
 
-49. **A sign-in hands out the product's own key, once, and the device page shows the code again.**
+49. **A sign-in hands out the product's own key, once, and no public route fetches a URL.**
     Lifted from the one backend that had MCP OAuth (362 lines, plus its routes and consent page)
     when both plugin directories made OAuth the price of a listing (2026-10-16). The token is the
     product's own API key, made by `mintKey`, so its key check, keys page and revocation stay the
@@ -986,7 +986,12 @@ Unhandled error event:", ...)` and returns — it never emits, so Node's throw i
     against a real Postgres. Only `deviceClients` may start a device sign-in: a registered client
     names itself, so anyone could start one called "Claude" and send the link to a stranger. A
     metadata document is fetched with no redirect followed, at most 5 KiB, and must name itself as
-    its `client_id`.
+    its `client_id`. It is fetched only by `describe` and `approve`, behind the product's sign-in:
+    the first version also fetched it on the token and device routes, so anyone could make the
+    server fetch any https URL, again and again, and a review before the first publish caught it.
+    The device page's code check stops a mistyped code, not phishing: somebody can run the real
+    CLI and send a stranger the link. The guard is the page saying to go on only if you started
+    the sign-in yourself (RFC 8628 §5.4), and the README says so.
 
 ### …and four for `@gusnips/sdkgen`
 

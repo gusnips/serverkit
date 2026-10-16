@@ -22,6 +22,7 @@ const TABLE_SQL = /```sql\n(CREATE TABLE app\.oauth_grants[\s\S]*?)```/.exec(
 )?.[1];
 
 const SECRET = "test-secret-test-secret-test-secret";
+const DOC_ID = "https://agent.example/oauth/client.json";
 const ISSUER = "https://api.example.com";
 const CALLBACK = "https://agent.example/callback";
 // RFC 7636 appendix B.
@@ -67,8 +68,10 @@ function memoryStore(): OAuthStore {
       }
       return true;
     },
-    async pollDevice(hash, now) {
-      const row = rows.find((r) => r.hash === hash && r.kind === "device");
+    async pollDevice(hash, clientId, now) {
+      const row = rows.find(
+        (r) => r.hash === hash && r.kind === "device" && r.clientId === clientId,
+      );
       if (!row) return null;
       const before = { ...row };
       row.polledAt = now;
@@ -379,6 +382,29 @@ function flows(name: string, setup: () => Promise<{ store: () => OAuthStore }>) 
         ).toMatchObject({ status: 400, body: { error: "invalid_client_metadata" } });
       });
 
+      it("lets a loopback listener pick its port at sign-in, and nothing else vary", async () => {
+        const oauth = make();
+        const { client_id } = await registered(oauth, {
+          redirect_uris: ["http://127.0.0.1/callback"],
+        });
+        const query = (uri: string) => authorizeQuery(client_id, { redirect_uri: uri });
+        expect(await oauth.describe(query("http://127.0.0.1:53111/callback"))).toMatchObject({
+          ok: true,
+        });
+        for (const uri of [
+          "http://127.0.0.1:53111/other",
+          "http://localhost:53111/callback",
+          "https://127.0.0.1:53111/callback",
+        ])
+          expect(await oauth.describe(query(uri))).toMatchObject({ reason: "redirect-mismatch" });
+      });
+
+      it("refuses an operating system's own handlers as a redirect", async () => {
+        const oauth = make();
+        for (const uri of ["ms-msdt:/id", "search-ms:query=x", "mailto:a@b.example", "chrome://x"])
+          expect((await oauth.register({ redirect_uris: [uri] })).status).toBe(400);
+      });
+
       it("names a client with no name after where it returns", async () => {
         const oauth = make();
         const answer = await oauth.register({ redirect_uris: ["http://127.0.0.1:33418/cb"] });
@@ -387,7 +413,7 @@ function flows(name: string, setup: () => Promise<{ store: () => OAuthStore }>) 
     });
 
     describe("a client id that is a URL", () => {
-      const ID = "https://agent.example/oauth/client.json";
+      const ID = DOC_ID;
       const doc = (body: Record<string, unknown>, init?: ResponseInit) =>
         new Response(JSON.stringify(body), init);
 
@@ -445,6 +471,22 @@ function flows(name: string, setup: () => Promise<{ store: () => OAuthStore }>) 
             reason: "unknown-client",
           });
         }
+      });
+
+      it("never fetches on the token endpoint, which anyone may call", async () => {
+        const oauth = make();
+        documents.set(
+          ID,
+          doc({ client_id: ID, client_name: "Agent App", redirect_uris: [CALLBACK] }),
+        );
+        const code = await approvedCode(oauth, ID);
+        fetched.length = 0;
+        expect(await oauth.token(exchange(code, ID), null)).toMatchObject({ status: 200 });
+        const stranger = "https://attacker.example/c.json";
+        expect((await oauth.token(exchange("bogus", stranger), null)).body.error).toBe(
+          "invalid_grant",
+        );
+        expect(fetched).toEqual([]);
       });
 
       it("never fetches a private address, plain http, or an origin with no path", async () => {
@@ -550,21 +592,38 @@ function flows(name: string, setup: () => Promise<{ store: () => OAuthStore }>) 
 
       it("answers only the client that started it, and only your own scripts", async () => {
         const oauth = make();
-        const { device_code } = codes(await start(oauth));
+        const { device_code, user_code } = codes(await start(oauth));
+        await oauth.decideDevice(user_code, { subject: "user-1" });
+        // Another client's poll of an approved sign-in must not spend it.
         expect((await poll(oauth, device_code, "other-cli")).body.error).toBe("invalid_grant");
         expect((await poll(oauth, "not-a-code")).body.error).toBe("invalid_grant");
+        expect(await poll(oauth, device_code)).toMatchObject({ status: 200 });
 
         const { client_id } = await registered(oauth, { client_name: "Claude" });
-        expect(await start(oauth, client_id)).toMatchObject({
-          status: 400,
-          body: { error: "unauthorized_client" },
+        for (const id of [client_id, "nobody", "constructor", "__proto__", "toString", DOC_ID])
+          expect(await start(oauth, id)).toMatchObject({
+            status: 400,
+            body: { error: "unauthorized_client" },
+          });
+        expect(fetched).toEqual([]);
+      });
+
+      it("draws again when a pending sign-in already shows the code", async () => {
+        const base = store();
+        let clashes = 1;
+        const clashing: OAuthStore = {
+          ...base,
+          // Only whether a grant came back is read, so an empty one stands in for the clash.
+          findDevice: async (hash, at) =>
+            clashes-- > 0 ? ({} as OAuthGrant) : base.findDevice(hash, at),
+        };
+        const inserted: OAuthGrant[] = [];
+        const oauth = make({
+          store: { ...clashing, insert: async (grant) => void inserted.push(grant) },
         });
-        expect(await start(oauth, "nobody")).toMatchObject({
-          status: 401,
-          body: { error: "invalid_client" },
-        });
-        for (const inherited of ["constructor", "__proto__", "toString"])
-          expect(await start(oauth, inherited)).toMatchObject({ status: 401 });
+        await start(oauth);
+        expect(clashes).toBe(-1);
+        expect(inserted).toHaveLength(1);
       });
 
       it("prunes what expired more than a day ago", async () => {
@@ -575,8 +634,15 @@ function flows(name: string, setup: () => Promise<{ store: () => OAuthStore }>) 
       });
     });
 
-    it("refuses a secret too short to sign with", () => {
+    it("refuses a secret too short to sign with, and a door on another origin", () => {
       expect(() => make({ secret: "short" })).toThrow(/at least 32 bytes/);
+      expect(() => make({ resource: "https://mcp.example.com/mcp" })).toThrow(/issuer's origin/);
+    });
+
+    it("reads an issuer written with a trailing slash as the same issuer", () => {
+      const oauth = make({ issuer: `${ISSUER}/` });
+      expect(oauth.authorizationServerMetadata().issuer).toBe(ISSUER);
+      expect(oauth.metadataPath).toBe("/.well-known/oauth-protected-resource/mcp");
     });
   });
 }
@@ -708,12 +774,17 @@ describe("oauthRoutes", () => {
     expect(own.headers.get("access-control-allow-origin")).toBe("*");
   });
 
-  it("lets any web page run discovery", async () => {
-    const res = await app.request("/oauth/token", {
+  it("lets any web page run discovery, with the MCP SDK's own header", async () => {
+    const res = await app.request("/.well-known/oauth-protected-resource/mcp", {
       method: "OPTIONS",
-      headers: { origin: "https://inspector.example", "access-control-request-method": "POST" },
+      headers: {
+        origin: "https://inspector.example",
+        "access-control-request-method": "GET",
+        "access-control-request-headers": "mcp-protocol-version",
+      },
     });
     expect(res.headers.get("access-control-allow-origin")).toBe("*");
+    expect(res.headers.get("access-control-allow-headers")).toBe("mcp-protocol-version");
   });
 
   it("registers from JSON, and starts a device sign-in from a form, uncached", async () => {
@@ -723,6 +794,7 @@ describe("oauthRoutes", () => {
       body: JSON.stringify({ redirect_uris: [CALLBACK] }),
     });
     expect(registered.status).toBe(201);
+    expect(registered.headers.get("cache-control")).toBe("no-store");
 
     const started = await app.request("/oauth/device_authorization", {
       method: "POST",

@@ -26,7 +26,9 @@ export function oauthRoutes<E extends Env = Env>(oauth: OAuth): Hono<E> {
   const r = new Hono<E>();
   // Path by path, never `"*"`: mounted at the root, a `"*"` here becomes `"/*"` in your app, and
   // every route you add after it would answer any origin, preflight included.
-  const anyOrigin = cors({ origin: "*", allowHeaders: ["Authorization", "Content-Type"] });
+  // No `allowHeaders`, so a preflight gets back the headers it asked for: the MCP SDK sends
+  // `MCP-Protocol-Version` on discovery, and no cookie rides on any of these.
+  const anyOrigin = cors({ origin: "*" });
   for (const path of [
     "/.well-known/oauth-protected-resource",
     oauth.metadataPath,
@@ -45,8 +47,9 @@ export function oauthRoutes<E extends Env = Env>(oauth: OAuth): Hono<E> {
     c.json(oauth.authorizationServerMetadata()),
   );
 
+  // `no-store` too: a confidential client's answer carries its secret.
   r.post("/oauth/register", async (c) =>
-    answer(c, await oauth.register(await c.req.json().catch(() => null))),
+    answer(c, await oauth.register(await c.req.json().catch(() => null)), true),
   );
   r.post("/oauth/token", async (c) =>
     answer(c, await oauth.token(await fieldsOf(c), basicCredentials(c)), true),
@@ -57,7 +60,7 @@ export function oauthRoutes<E extends Env = Env>(oauth: OAuth): Hono<E> {
   return r;
 }
 
-/** A token must never be cached between us and the client (RFC 6749 §5.1). */
+/** A token or a secret must never be cached between us and the client (RFC 6749 §5.1). */
 function answer<E extends Env>(c: Context<E>, result: OAuthAnswer, noStore = false): Response {
   if (noStore) {
     c.header("Cache-Control", "no-store");

@@ -17,8 +17,9 @@
  * - **The device flow** (RFC 8628), for a script or a CLI whose browser cannot come back to the
  *   machine: a box with no browser, a container, a chat. It prints a link and a short code, the
  *   person approves on any device, and the script's next poll gets the key, once. The person
- *   types the code into OUR page, never into the agent, and the page shows it again so they can
- *   check it is the one on their screen. That check is what stops a link someone else started.
+ *   types the code into OUR page, never into the agent. Nothing here can tell a link the person
+ *   started from one somebody else started and sent them, so the device page must say to go on
+ *   only if they started this sign-in themselves, just now (RFC 8628 §5.4).
  *
  * Your consent and device pages sit behind your own session and call `describe` and `approve`,
  * `describeDevice` and `decideDevice`. Everything public is `oauthRoutes`.
@@ -75,6 +76,17 @@ const UNSAFE_SCHEMES = new Set([
   "ftp:",
   "ws:",
   "wss:",
+  "view-source:",
+  "mailto:",
+  "tel:",
+  "sms:",
+  "intent:",
+  "chrome:",
+  "edge:",
+  "shell:",
+  "smb:",
+  "search:",
+  "search-ms:",
 ]);
 
 export interface OAuthClient {
@@ -129,10 +141,11 @@ export interface OAuthStore {
     now: Date,
   ): Promise<boolean>;
   /**
-   * One poll, in one step: records the time, and an approved sign-in becomes used. Returns the
-   * grant as it was BEFORE this poll, or `null` when the device code is unknown.
+   * One poll by `clientId`, in one step: records the time, and an approved sign-in becomes used.
+   * Returns the grant as it was BEFORE this poll, or `null` when no device sign-in of that client
+   * has this code. Another client's poll must change nothing, or it could spend the sign-in.
    */
-  pollDevice(hash: string, now: Date): Promise<OAuthGrant | null>;
+  pollDevice(hash: string, clientId: string, now: Date): Promise<OAuthGrant | null>;
   /** Deletes grants that expired before `before`. Returns how many. */
   prune(before: Date): Promise<number>;
 }
@@ -234,9 +247,14 @@ const encoder = new TextEncoder();
 const decoder = new TextDecoder();
 
 export function createOAuth(options: OAuthOptions) {
-  const { issuer, resource, store, secret } = options;
+  const { resource, store, secret } = options;
+  const issuer = options.issuer.replace(/\/+$/, "");
   if (encoder.encode(secret).length < 32)
     throw new TypeError("The OAuth secret must be at least 32 bytes. Generate a random one.");
+  // The resource's metadata is served beside the issuer's, and a client looks for it on the
+  // resource's own origin. A door on another host would be refused as "another server".
+  if (new URL(resource).origin !== issuer)
+    throw new TypeError(`The OAuth resource must be on the issuer's origin, ${issuer}`);
   const now = options.now ?? (() => new Date());
   const fetchClientDocument = options.fetchClientDocument ?? defaultFetchClientDocument;
   const resourcePath = new URL(resource).pathname.replace(/\/+$/, "");
@@ -320,7 +338,13 @@ export function createOAuth(options: OAuthOptions) {
 
   /** The client, when it proved who it is: a public client by its id, any other by its secret. */
   async function authenticate(credentials: ClientCredentials): Promise<OAuthClient | null> {
-    const client = await findClient(credentials.id);
+    // A metadata document can only describe a public client, and the code it trades was bound to
+    // this exact id when the person approved, behind their own session. Fetching it again here
+    // would let anyone, signed in or not, make us fetch any URL they name.
+    const { id } = credentials;
+    if (id?.startsWith("https://") && id.length <= MAX_CLIENT_ID_LENGTH)
+      return { id, name: id, redirectUris: [], authMethod: "none" };
+    const client = await findClient(id);
     if (!client) return null;
     if (client.authMethod === "none") return client;
     const given = credentials.secret;
@@ -360,7 +384,7 @@ export function createOAuth(options: OAuthOptions) {
       return refusal("unknown-client", "We could not identify the app asking to connect.");
     // Never redirect on these two: an unknown client, or a redirect it never registered, is how
     // an open redirect gets built.
-    if (!client.redirectUris.includes(request.redirectUri))
+    if (!client.redirectUris.some((uri) => sameRedirect(uri, request.redirectUri)))
       return refusal("redirect-mismatch", "This app's sign-in link is not valid.");
     if (request.resource !== undefined && !isOurResource(request.resource))
       return refusal("wrong-resource", "This sign-in link is for another server.");
@@ -403,8 +427,8 @@ export function createOAuth(options: OAuthOptions) {
   async function pollDevice(client: OAuthClient, deviceCode: string | undefined) {
     if (!deviceCode) return oauthError("invalid_request", "device_code is required");
     const at = now();
-    const before = await store.pollDevice(await sha256Hex(deviceCode), at);
-    if (!before || before.clientId !== client.id)
+    const before = await store.pollDevice(await sha256Hex(deviceCode), client.id, at);
+    if (!before)
       return oauthError("invalid_grant", "This device code is not one we issued to this client.");
     if (before.expiresAt <= at)
       return oauthError("expired_token", "The code expired. Start the sign-in again.");
@@ -588,18 +612,26 @@ export function createOAuth(options: OAuthOptions) {
       fields: Record<string, string>,
       basic: ClientCredentials | null,
     ): Promise<OAuthAnswer> {
-      const client = await authenticate(
-        basic ?? { id: fields.client_id, secret: fields.client_secret },
-      );
-      if (!client) return oauthError("invalid_client", "Unknown client, or a wrong secret", 401);
-      // Only your own scripts. A registered client names itself, so anyone could start a sign-in
-      // called "Claude" and send the link to someone who never asked for one.
-      if (!isDeviceClient(client.id))
+      // Only your own scripts, checked before anything else so no client id is ever fetched
+      // here. A registered client names itself, so anyone could start a sign-in called "Claude".
+      const id = basic?.id ?? fields.client_id;
+      if (id === undefined || !isDeviceClient(id))
         return oauthError("unauthorized_client", "This client may not use the device flow");
+      const client = await authenticate({ id, secret: basic?.secret ?? fields.client_secret });
+      if (!client) return oauthError("invalid_client", "Unknown client, or a wrong secret", 401);
       if (fields.resource !== undefined && !isOurResource(fields.resource))
         return oauthError("invalid_target", `Tokens here are for ${resource}`);
       const deviceCode = randomToken();
-      const userCode = randomUserCode();
+      const at = now();
+      // A code another pending sign-in already shows would let one approval answer the wrong
+      // script, so draw again. At 20^8 codes this loop almost never runs twice.
+      let userCode = randomUserCode();
+      for (
+        let draw = 1;
+        draw < 5 && (await store.findDevice(await sha256Hex(userCode), at));
+        draw++
+      )
+        userCode = randomUserCode();
       await store.insert({
         hash: await sha256Hex(deviceCode),
         kind: "device",
@@ -611,7 +643,7 @@ export function createOAuth(options: OAuthOptions) {
         subject: null,
         keyName: null,
         status: "pending",
-        expiresAt: new Date(now().getTime() + DEVICE_TTL_SECS * 1000),
+        expiresAt: new Date(at.getTime() + DEVICE_TTL_SECS * 1000),
         polledAt: null,
       });
       const shown = formatUserCode(userCode);
@@ -727,8 +759,31 @@ export function isAllowedRedirect(value: string): boolean {
   }
   if (url.hash || url.username || url.password) return false;
   if (url.protocol === "https:") return true;
-  if (url.protocol === "http:") return ["localhost", "127.0.0.1", "[::1]"].includes(url.hostname);
-  return !UNSAFE_SCHEMES.has(url.protocol);
+  if (url.protocol === "http:") return isLoopback(url);
+  // `ms-` is Windows' own family (`ms-msdt:`, `ms-officecmd:`), which opens system tools.
+  return !UNSAFE_SCHEMES.has(url.protocol) && !url.protocol.startsWith("ms-");
+}
+
+function isLoopback(url: URL): boolean {
+  return ["localhost", "127.0.0.1", "[::1]"].includes(url.hostname);
+}
+
+/**
+ * The redirect a client registered, matched exactly, except that a desktop app's listener on this
+ * machine may pick any free port each time (RFC 8252 §7.3).
+ */
+function sameRedirect(registered: string, requested: string): boolean {
+  if (registered === requested) return true;
+  let a: URL, b: URL;
+  try {
+    a = new URL(registered);
+    b = new URL(requested);
+  } catch {
+    return false;
+  }
+  if (a.protocol !== "http:" || b.protocol !== "http:" || !isLoopback(a)) return false;
+  a.port = b.port;
+  return a.toString() === b.toString();
 }
 
 /** The S256 challenge a verifier must match. */

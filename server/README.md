@@ -1360,8 +1360,8 @@ const oauth = createOAuth({
 
 // A 401 from your door now says where to sign in.
 const errorResponse = createErrorResponse({ internal, validation, challenge: oauth.challenge });
-app.use("/oauth/device_authorization", rateLimit({ store, limit: 10, windowMs: 60_000, ... }));
-app.route("/", oauthRoutes(oauth));
+app.use("/oauth/*", rateLimit({ store, limit: 30, windowMs: 60_000, ... }));
+app.route("/", oauthRoutes(oauth)); // before your own CORS, which would answer its preflights
 ```
 
 `oauth.challenge` is
@@ -1377,9 +1377,15 @@ your API:
   next. "Cancel" goes to `cancelUrl`. Check that the person may make a key before you call
   `approve`, so a refusal shows on your page and not inside the client.
 - **The device page** (`devicePage`). The link the script prints carries the code. Show the code
-  from `describeDevice(code)` and ask whether it matches the one on their screen. That question is
-  what stops a link somebody else started. Then `decideDevice(code, { subject: userId })`, or
+  from `describeDevice(code)`, the app's name, and this: go on only if you started this sign-in
+  yourself, just now, and the code matches the one on your screen. Nothing on the server can tell
+  a link the person started from one somebody else started and sent them (RFC 8628 §5.4), so
+  that sentence is the guard. Then `decideDevice(code, { subject: userId })`, or
   `decideDevice(code, "deny")`.
+
+Serve both pages with `frame-ancestors 'none'`, so another site can't frame them and steal the
+click. Read the session on those two routes from a header, as an API does, not from a cookie,
+or protect them against cross-site requests.
 
 Both return `{ ok: false, reason, message }` instead of throwing. `reason` is one of
 `unknown-client`, `redirect-mismatch`, `invalid-request`, `wrong-resource` and `unknown-code`;
@@ -1412,17 +1418,22 @@ CREATE INDEX oauth_grants_expires_at_idx ON app.oauth_grants (expires_at);
   table signs anyone in. Run `oauth.prune()` once a night: it deletes grants that expired more
   than a day ago.
 - **A client id comes three ways.** An https URL is a client metadata document: fetched, checked
-  and cached for five minutes, which the MCP spec asks for. Anything else is a registration
-  (`POST /oauth/register`) that stores nothing: the id is our signature over the client's name and
-  redirects, so registering costs no row. The third is a name in `deviceClients`.
+  and cached for five minutes, which the MCP spec asks for. It is fetched only by `describe` and
+  `approve`, behind your sign-in, and never by the public routes, so nobody can make your server
+  fetch a URL without signing in. Anything else is a registration (`POST /oauth/register`) that
+  stores nothing: the id is our signature over the client's name and redirects, so registering
+  costs no row. The third is a name in `deviceClients`.
 - **Only `deviceClients` may start a device sign-in.** A registered client picks its own name, so
   anyone could start a sign-in called "Claude" and send the link to someone who never asked.
-- **A code works once, within 5 minutes**, with PKCE S256 and a `resource` that must be your
-  door. A device sign-in lasts 10 minutes, the script polls every 5 seconds, a faster poll gets
+- **A code works once, within 5 minutes**, with PKCE S256. A `resource` may be left out, or be
+  your door or your issuer; anything else is refused. The door must be on the issuer's origin,
+  and `createOAuth` throws when it isn't. A device sign-in lasts 10 minutes, the script polls every 5 seconds, a faster poll gets
   `slow_down`, and the key is handed out once. A user code is 8 letters with no vowels,
   `WDJB-MJHT`, and is read however it is typed.
 - **A redirect** may be https, http on localhost, or an app's own scheme such as `cursor://`.
-  Never a fragment, and never `javascript:`, `data:` or `file:`.
+  Never a fragment, never `javascript:`, `data:` or `file:`, and never a handler of the operating
+  system's own (`ms-msdt:`, `search-ms:`, `mailto:`). A redirect on 127.0.0.1 may use any port at
+  sign-in, because a desktop app listens on whichever port is free (RFC 8252 §7.3).
 - **No expiry and no refresh token.** The key lasts until someone revokes it, like one pasted by
   hand.
 - **On a server, fetch metadata documents with `fetchPublic`.** The default checks the URL's
