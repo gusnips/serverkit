@@ -50,7 +50,7 @@
     },
     "server": {
       "name": "@gusnips/server",
-      "version": "0.10.0",
+      "version": "0.11.0",
       "devDependencies": {
         "@gusnips/http": ">=0.2.0 <1",
         "@modelcontextprotocol/sdk": "^1.30.1",
