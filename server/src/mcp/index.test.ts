@@ -9,6 +9,7 @@ import {
   registerOperation,
   toolError,
   type ToolDoor,
+  type ToolLabels,
   type ToolOperation,
 } from "./index.ts";
 
@@ -37,9 +38,10 @@ interface Deps {
 const getPlace: ToolOperation<Deps, { id: string; limit: number }, { id: string; owner: string }> =
   {
     name: "get_place",
+    title: "Read a place",
     description: "Reads one place.",
     inputSchema: z.object({ id: z.string(), limit: z.number().max(10).default(5) }).strict(),
-    annotations: { readOnlyHint: true },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
     async run(deps, args) {
       if (args.id === "missing") throw appError("NOT_FOUND", "Place not found");
       if (args.id === "down")
@@ -270,19 +272,25 @@ describe("registerOperation", () => {
     // The shape an app's `defineOperation` returns: `run` as a property, and the schema typed.
     interface AppOperation<I, O> {
       name: string;
+      title: string;
       description: string;
+      annotations: ToolLabels;
       inputSchema: z.ZodType<I>;
       run: (deps: Deps, args: I) => Promise<O>;
     }
     const echo: AppOperation<{ text: string }, string> = {
       name: "echo",
+      title: "Echo",
       description: "Says it back.",
+      annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
       inputSchema: z.object({ text: z.string() }).strict(),
       run: async (_deps, args) => args.text,
     };
     const count: AppOperation<{ n: number }, number> = {
       name: "count",
+      title: "Count",
       description: "Adds one.",
+      annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
       inputSchema: z.object({ n: z.number() }).strict(),
       run: async (_deps, args) => args.n + 1,
     };
@@ -315,12 +323,27 @@ describe("registerOperation", () => {
     const shape = { id: z.string() };
     const op: ToolOperation<Deps, { id: string }, string> = {
       name: "x",
+      title: "X",
       description: "x",
+      annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
       // @ts-expect-error a shape would be rebuilt as a loose object, dropping unknown keys
       inputSchema: shape,
       run: async () => "x",
     };
     expect(op.name).toBe("x");
+  });
+
+  it("will not take a tool that leaves out a label the plugin directories check", () => {
+    const op: ToolOperation<Deps, { id: string }, string> = {
+      name: "x",
+      title: "X",
+      description: "x",
+      inputSchema: z.object({ id: z.string() }).strict(),
+      // @ts-expect-error openWorldHint is missing, and both directories refuse a tool without it
+      annotations: { readOnlyHint: true, destructiveHint: false },
+      run: async () => "x",
+    };
+    expect(op.title).toBe("X");
   });
 });
 

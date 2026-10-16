@@ -433,15 +433,18 @@ describe("README — an MCP door", () => {
     type Deps = { userId: string };
     const getPlace: ToolOperation<Deps, { id: string }, { id: string; owner: string }> = {
       name: "get_place",
+      title: "Read a place",
       description: "Reads one place by its id.",
       inputSchema: z.object({ id: z.string() }).strict(),
-      annotations: { readOnlyHint: true },
+      annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
       run: async (deps, args) => ({ id: args.id, owner: deps.userId }),
     };
     const findPlaces: ToolOperation<Deps, { q: string }, string[]> = {
       name: "find_places",
+      title: "Find places",
       description: "Finds places by name.",
       inputSchema: z.object({ q: z.string() }).strict(),
+      annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
       run: async (_deps, args) => [args.q],
     };
     const OPERATIONS = [getPlace, findPlaces];

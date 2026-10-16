@@ -1252,8 +1252,25 @@ app.use("/mcp/*", async (c, next) => {
 app.route("/", mcpRoutes("/mcp", buildMcpServer, { allowedOrigins: new Set() }));
 ```
 
-An operation is `{ name, description, inputSchema, run(deps, args) }`, plus an optional `title`
-and `annotations`. Pass the same list to `buildOpenApi` as `mcpTools` (below), and the reference
+An operation is `{ name, title, description, inputSchema, annotations, run(deps, args) }`.
+`annotations` must set all three hints: `readOnlyHint`, `destructiveHint` and `openWorldHint`.
+Clients read them to decide whether a call needs the person's approval, and Claude's and OpenAI's
+plugin directories both refuse a tool that leaves one out. A read is `true, false, false`. A tool
+that fetches any web page is open world. A tool that sends a message or deletes a row is
+destructive, even when you could undo it.
+
+```ts
+const getPlace: ToolOperation<Deps, { id: string }, Place> = {
+  name: "get_place",
+  title: "Read a place",
+  description: "Reads one place by its id.",
+  inputSchema: z.object({ id: z.string() }).strict(),
+  annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
+  run: async (deps, args) => deps.places.get(args.id),
+};
+```
+
+Pass the same list to `buildOpenApi` as `mcpTools` (below), and the reference
 lists exactly the tools you register, with their own arguments, in your order. A tool that takes
 more than its REST route needs this. A tool call has no headers, so a key that makes a retry safe
 travels as an argument, such as `idempotencyKey`. A card built from the route's `input` leaves that

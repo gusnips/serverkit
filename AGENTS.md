@@ -861,6 +861,12 @@ Unhandled error event:", ...)` and returns — it never emits, so Node's throw i
     it is compared both ways, and `{ id: string }` stands where `unknown` is asked for with no cast,
     also from an app's own operation type whose `run` is a property (tested).
 
+    `title` and the three hints (`readOnlyHint`, `destructiveHint`, `openWorldHint`) are required.
+    Claude's and OpenAI's plugin directories both refuse a tool without them (their review rules,
+    read 2026-10-16), and six of eight doors set none. Optional, they were left out; required,
+    each door's typecheck names the tool that lacks them before a reviewer does. `ToolLabels` is
+    a type, not an interface, because an interface does not fit the OpenAPI card's JSON object.
+
 46. **A webhook sender retries what waiting can fix, believes `Retry-After`, and counts on the
     row.** Seven senders, three lineages, and the decision after an attempt was different in each.
     Six retried every 4xx, and no sender read `Retry-After`. Redirects were handled three ways.

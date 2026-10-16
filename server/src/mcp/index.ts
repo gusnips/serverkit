@@ -37,17 +37,34 @@ import type { ErrorAnswer } from "../responses.ts";
 /** What the SDK hands each tool call: its session id, if any, and a signal for cancellation. */
 export type ToolCallExtra = RequestHandlerExtra<ServerRequest, ServerNotification>;
 
+/**
+ * The three hints a client uses to decide whether a call needs the person's approval. Claude's and
+ * OpenAI's plugin directories both refuse a tool that leaves one out (their review rules, read
+ * 2026-10-16), and six of eight doors had set none, so the type asks for all three.
+ *
+ * A type, not an interface: an interface would stop it fitting the OpenAPI card's JSON object.
+ */
+export type ToolLabels = ToolAnnotations & {
+  /** `true` when the call changes nothing: a read, a search, a preview. */
+  readOnlyHint: boolean;
+  /** `true` when a write can delete, overwrite or send something that cannot be taken back. */
+  destructiveHint: boolean;
+  /** `true` when the call reaches past your own data: the open web, any address, any person. */
+  openWorldHint: boolean;
+};
+
 /** The shape every operation layer in the fleet already has. */
 export interface ToolOperation<Deps, Args, Result> {
   name: string;
-  title?: string;
+  /** What a person reads when the client asks them to approve the call. */
+  title: string;
   description: string;
   /**
    * The zod object itself, made `.strict()`. A `.shape` does not compile here: the SDK would
    * rebuild it as a loose object and drop any argument the agent invented.
    */
   inputSchema: AnySchema;
-  annotations?: ToolAnnotations;
+  annotations: ToolLabels;
   run(deps: Deps, args: Args): Promise<Result>;
 }
 
