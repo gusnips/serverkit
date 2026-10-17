@@ -1257,7 +1257,8 @@ An operation is `{ name, title, description, inputSchema, annotations, run(deps,
 Clients read them to decide whether a call needs the person's approval, and Claude's and OpenAI's
 plugin directories both refuse a tool that leaves one out. A read is `true, false, false`. A tool
 that fetches any web page is open world. A tool that sends a message or deletes a row is
-destructive, even when you could undo it.
+destructive, even when you could undo it. `registerOperation` also copies `title` into
+`annotations.title`, because Claude's directory reads the title only from there.
 
 ```ts
 const getPlace: ToolOperation<Deps, { id: string }, Place> = {

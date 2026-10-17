@@ -141,6 +141,20 @@ describe("registerOperation", () => {
     expect(counted).toEqual(["get_place"]);
   });
 
+  it("lists the title at the top and in annotations, where Claude's directory reads it", async () => {
+    const { app } = harness();
+    const { json } = await post(app, { jsonrpc: "2.0", id: 1, method: "tools/list" });
+    const [tool] = (json as { result: { tools: { title: string; annotations: unknown }[] } }).result
+      .tools;
+    expect(tool!.title).toBe("Read a place");
+    expect(tool!.annotations).toEqual({
+      title: "Read a place",
+      readOnlyHint: true,
+      destructiveHint: false,
+      openWorldHint: false,
+    });
+  });
+
   it("lets the SDK refuse an argument the agent invented, naming it", async () => {
     const { app, counted } = harness();
     const answer = await callTool(app, { id: "p_1", bogus: 1 });

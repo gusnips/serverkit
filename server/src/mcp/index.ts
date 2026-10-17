@@ -137,7 +137,9 @@ export function registerOperation<Deps>(
   const { name, title, description, inputSchema, annotations } = op;
   server.registerTool(
     name,
-    { title, description, inputSchema, annotations },
+    // The title goes in `annotations` too: Claude's directory reads it only from there, and flagged
+    // every tool of a door "Missing title annotation" with only the top-level one set (2026-10-17).
+    { title, description, inputSchema, annotations: { title, ...annotations } },
     // The SDK has parsed `args` with the operation's own `inputSchema` before this runs. Its
     // callback type is one function per zod major, so the parameters are named, not inferred.
     async (args: unknown, extra: ToolCallExtra) => {
