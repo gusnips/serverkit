@@ -160,3 +160,64 @@ function grantOf(row: GrantRow | undefined): OAuthGrant | null {
     polledAt: row.polled_at,
   };
 }
+
+/** What the store reads and writes, by column, as `format_type` names it. */
+const EXPECTED: Record<string, { type: string; takesNull: boolean }> = {
+  hash: { type: "text", takesNull: false },
+  kind: { type: "text", takesNull: false },
+  client_id: { type: "text", takesNull: false },
+  client_name: { type: "text", takesNull: false },
+  redirect_uri: { type: "text", takesNull: true },
+  code_challenge: { type: "text", takesNull: true },
+  user_code_hash: { type: "text", takesNull: true },
+  subject: { type: "text", takesNull: true },
+  key_name: { type: "text", takesNull: true },
+  status: { type: "text", takesNull: false },
+  expires_at: { type: "timestamp with time zone", takesNull: false },
+  polled_at: { type: "timestamp with time zone", takesNull: true },
+  created_at: { type: "timestamp with time zone", takesNull: false },
+};
+
+/**
+ * What is wrong with your grants table, measured against what `createPgOAuthStore` reads and
+ * writes: `[]` when nothing is. Run it in the test that applies your migrations, so a migration
+ * that drifted from the README's fails there and not at somebody's first sign-in.
+ *
+ *     expect(await checkOAuthTable(pool, { table: "app.oauth_grants" })).toEqual([]);
+ */
+export async function checkOAuthTable(
+  pool: Pick<Pool, "query">,
+  options: PgOAuthStoreOptions,
+): Promise<string[]> {
+  const { table } = options;
+  if (!TABLE_NAME.test(table))
+    throw new TypeError(`The OAuth table must be a name or schema.name, not "${table}"`);
+  const { rows } = await pool.query<{
+    name: string;
+    type: string;
+    not_null: boolean;
+    has_default: boolean;
+  }>(
+    `SELECT attname AS name, format_type(atttypid, NULL) AS type, attnotnull AS not_null,
+            atthasdef AS has_default
+       FROM pg_attribute WHERE attrelid = to_regclass($1) AND attnum > 0 AND NOT attisdropped`,
+    [table],
+  );
+  if (rows.length === 0)
+    return [`${table} does not exist. Add the README's CREATE TABLE as a migration.`];
+
+  const problems: string[] = [];
+  for (const [name, expected] of Object.entries(EXPECTED)) {
+    const column = rows.find((row) => row.name === name);
+    if (!column) problems.push(`${table}.${name} is missing (${expected.type}).`);
+    else if (column.type !== expected.type)
+      problems.push(`${table}.${name} is ${column.type}; the store uses ${expected.type}.`);
+    else if (expected.takesNull && column.not_null)
+      problems.push(`${table}.${name} is NOT NULL, but the store leaves it empty on some rows.`);
+  }
+  // The store never writes it, and orders device sign-ins by it.
+  const created = rows.find((row) => row.name === "created_at");
+  if (created && !created.has_default)
+    problems.push(`${table}.created_at needs DEFAULT now(): the store never writes it.`);
+  return problems;
+}

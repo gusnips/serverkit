@@ -1,15 +1,18 @@
 import { createHmac } from "node:crypto";
 import { readFileSync } from "node:fs";
-import { Hono } from "hono";
+import { Hono, type Context } from "hono";
 import { Pool } from "pg";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { hasPostgres, startPostgres } from "../__tests__/postgres-server.ts";
-import { createPgOAuthStore } from "../pg/oauth-store.ts";
+import { checkOAuthTable, createPgOAuthStore } from "../pg/oauth-store.ts";
 import {
   challengeOf,
   createOAuth,
   isAllowedRedirect,
+  isOAuthPath,
   normalizeUserCode,
+  oauthChallenge,
+  oauthConsoleRoutes,
   oauthRoutes,
   type OAuthGrant,
   type OAuthOptions,
@@ -98,6 +101,17 @@ function authorizeQuery(clientId: string, overrides: Record<string, string> = {}
     resource: `${ISSUER}/mcp`,
     ...overrides,
   });
+}
+
+/** `oauthRoutes`' limit, keyed on a header the test sets, refusing with a plain 429. */
+class TooMany extends Error {}
+const routeOptions = {
+  deviceKey: (c: Context) => c.req.header("x-caller") ?? "anyone",
+  refuse: () => new TooMany("Too many device sign-ins"),
+};
+function withErrors(app: Hono): Hono {
+  app.onError((err, c) => c.json({ thrown: err.message }, err instanceof TooMany ? 429 : 500));
+  return app;
 }
 
 /** The same flows against each store: the memory one above, and Postgres when it is installed. */
@@ -711,6 +725,26 @@ describe.skipIf(!hasPostgres)("createPgOAuthStore", () => {
   it("refuses a table name that is not a name", () => {
     expect(() => createPgOAuthStore(pool, { table: "grants; DROP TABLE x" })).toThrow(TypeError);
   });
+
+  it("finds nothing wrong with the README's table, and names what drifted in another", async () => {
+    expect(await checkOAuthTable(pool, { table: "app.oauth_grants" })).toEqual([]);
+    expect(await checkOAuthTable(pool, { table: "app.nowhere" })).toEqual([
+      "app.nowhere does not exist. Add the README's CREATE TABLE as a migration.",
+    ]);
+    await pool.query("CREATE TABLE app.drifted (LIKE app.oauth_grants INCLUDING DEFAULTS)");
+    await pool.query(`ALTER TABLE app.drifted
+      DROP COLUMN polled_at,
+      ALTER COLUMN key_name SET NOT NULL,
+      ALTER COLUMN client_name TYPE varchar(60),
+      ALTER COLUMN created_at DROP DEFAULT`);
+    expect(await checkOAuthTable(pool, { table: "app.drifted" })).toEqual([
+      "app.drifted.client_name is character varying; the store uses text.",
+      "app.drifted.key_name is NOT NULL, but the store leaves it empty on some rows.",
+      "app.drifted.polled_at is missing (timestamp with time zone).",
+      "app.drifted.created_at needs DEFAULT now(): the store never writes it.",
+    ]);
+    await expect(checkOAuthTable(pool, { table: "x; DROP TABLE y" })).rejects.toThrow(TypeError);
+  });
 });
 
 describe("oauthRoutes", () => {
@@ -725,8 +759,8 @@ describe("oauthRoutes", () => {
     documentation: "https://example.com/docs",
     mintKey: async () => "ak_1",
   });
-  const app = new Hono();
-  app.route("/", oauthRoutes(oauth));
+  const app = withErrors(new Hono());
+  app.route("/", oauthRoutes(oauth, routeOptions));
 
   it("serves both discovery documents, at both protected-resource paths", async () => {
     for (const path of [
@@ -754,11 +788,12 @@ describe("oauthRoutes", () => {
     expect(oauth.challenge).toBe(
       `Bearer resource_metadata="${ISSUER}/.well-known/oauth-protected-resource/mcp"`,
     );
+    expect(oauthChallenge(`${ISSUER}/mcp/`)).toBe(oauth.challenge);
   });
 
   it("answers any origin on its own paths only, not on your routes mounted after it", async () => {
     const mounted = new Hono();
-    mounted.route("/", oauthRoutes(oauth));
+    mounted.route("/", oauthRoutes(oauth, routeOptions));
     mounted.get("/v1/me", (c) => c.json({ me: 1 }));
     const origin = { origin: "https://elsewhere.example" };
     const later = await mounted.request("/v1/me", { headers: origin });
@@ -830,6 +865,227 @@ describe("oauthRoutes", () => {
     });
     expect(res.status).toBe(400);
     expect(await res.json()).toMatchObject({ error: "unsupported_grant_type" });
+  });
+});
+
+describe("oauthRoutes' own limits", () => {
+  const make = () => {
+    const oauth = createOAuth({
+      issuer: ISSUER,
+      resource: `${ISSUER}/mcp`,
+      authorizePage: "https://example.com/oauth/authorize",
+      devicePage: "https://example.com/device",
+      secret: SECRET,
+      store: memoryStore(),
+      deviceClients: { "acme-cli": "Acme CLI" },
+      mintKey: async () => "ak_1",
+    });
+    const app = withErrors(new Hono());
+    app.route("/", oauthRoutes(oauth, routeOptions));
+    return app;
+  };
+  const start = (app: Hono, caller: string) =>
+    app.request("/oauth/device_authorization", {
+      method: "POST",
+      headers: { "content-type": "application/x-www-form-urlencoded", "x-caller": caller },
+      body: "client_id=acme-cli",
+    });
+
+  it("lets one caller start 10 device sign-ins a minute, and counts no preflight", async () => {
+    const app = make();
+    for (let i = 0; i < 5; i++)
+      await app.request("/oauth/device_authorization", {
+        method: "OPTIONS",
+        headers: {
+          origin: "https://x.example",
+          "access-control-request-method": "POST",
+          "x-caller": "a",
+        },
+      });
+    for (let i = 0; i < 10; i++) expect((await start(app, "a")).status).toBe(200);
+    const refused = await start(app, "a");
+    expect(refused.status).toBe(429);
+    expect(await refused.json()).toEqual({ thrown: "Too many device sign-ins" });
+    expect((await start(app, "b")).status).toBe(200);
+  });
+
+  it("refuses a body over 64 KiB in OAuth's shape, before reading it", async () => {
+    const res = await make().request("/oauth/register", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ redirect_uris: [CALLBACK], client_name: "x".repeat(70_000) }),
+    });
+    expect(res.status).toBe(413);
+    expect(await res.json()).toMatchObject({ error: "invalid_request" });
+  });
+
+  it("names exactly the paths it answers, for your CORS to skip", () => {
+    for (const path of [
+      "/.well-known/oauth-protected-resource",
+      "/.well-known/oauth-protected-resource/mcp",
+      "/.well-known/oauth-authorization-server",
+      "/oauth/register",
+      "/oauth/token",
+      "/oauth/device_authorization",
+    ])
+      expect(isOAuthPath(path)).toBe(true);
+    for (const path of [
+      "/oauth/authorize",
+      "/oauth",
+      "/oauth/registerx",
+      "/.well-known/oauth-protected-resources",
+      "/.well-known/security.txt",
+      "/v1/me",
+    ])
+      expect(isOAuthPath(path)).toBe(false);
+  });
+});
+
+describe("oauthConsoleRoutes", () => {
+  function make(approver: (c: Context, choice: unknown) => string | Promise<string>) {
+    const minted: { subject: string; keyName: string }[] = [];
+    const oauth = createOAuth({
+      issuer: ISSUER,
+      resource: `${ISSUER}/mcp`,
+      authorizePage: "https://example.com/oauth/authorize",
+      devicePage: "https://example.com/device",
+      secret: SECRET,
+      store: memoryStore(),
+      deviceClients: { "acme-cli": "Acme CLI" },
+      mintKey: async (grant) => {
+        minted.push({ subject: grant.subject, keyName: grant.keyName });
+        return "ak_console";
+      },
+    });
+    const app = withErrors(new Hono());
+    app.route("/auth/oauth", oauthConsoleRoutes(oauth, { approver }));
+    const post = (path: string, body: unknown) =>
+      app.request(`/auth/oauth${path}`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: typeof body === "string" ? body : JSON.stringify(body),
+      });
+    return { oauth, app, post, minted };
+  }
+
+  async function registered(oauth: ReturnType<typeof createOAuth>) {
+    const { body } = await oauth.register({ redirect_uris: [CALLBACK], client_name: "Agent" });
+    return String(body.client_id);
+  }
+
+  it("describes the request, and the yes sends a code that trades for the approver's subject", async () => {
+    const seen: unknown[] = [];
+    const { oauth, app, post, minted } = make((_c, choice) => {
+      seen.push(choice);
+      return "user-7";
+    });
+    const query = authorizeQuery(await registered(oauth)).toString();
+
+    const view = await app.request(`/auth/oauth/request?${query}`);
+    expect(await view.json()).toEqual({
+      data: expect.objectContaining({
+        ok: true,
+        clientName: "Agent",
+        redirectHost: "agent.example",
+      }),
+    });
+
+    const approved = await post("/approve", { query, choice: { workspace: "w1" } });
+    const { data } = (await approved.json()) as { data: { ok: true; redirectTo: string } };
+    expect(data.ok).toBe(true);
+    expect(seen).toEqual([{ workspace: "w1" }]);
+    const code = new URL(data.redirectTo).searchParams.get("code") ?? "";
+    const traded = await oauth.token(
+      {
+        grant_type: "authorization_code",
+        code,
+        redirect_uri: CALLBACK,
+        code_verifier: VERIFIER,
+        client_id: new URLSearchParams(query).get("client_id") ?? "",
+      },
+      null,
+    );
+    expect(traded.status).toBe(200);
+    expect(minted).toEqual([{ subject: "user-7", keyName: "Agent (agent.example)" }]);
+  });
+
+  it("lets the approver's own error stop a yes, and makes no code", async () => {
+    const { oauth, post } = make(() => {
+      throw new Error("You already have 3 active keys");
+    });
+    const query = authorizeQuery(await registered(oauth)).toString();
+    const res = await post("/approve", { query });
+    expect(res.status).toBe(500);
+    expect(await res.json()).toEqual({ thrown: "You already have 3 active keys" });
+  });
+
+  it("answers a body its own page would never send as a refusal, and never asks the approver", async () => {
+    let asked = 0;
+    const { app, post } = make(() => {
+      asked++;
+      return "user-1";
+    });
+    for (const [path, body] of [
+      ["/approve", "not json"],
+      ["/approve", [1, 2]],
+      ["/approve", { query: 42 }],
+      ["/approve", { query: "a".repeat(8_193) }],
+      ["/device", { code: "WDJB-MJHT" }],
+      ["/device", { code: "WDJB-MJHT", decision: "maybe" }],
+      ["/device", { code: "W".repeat(33), decision: "approve" }],
+    ] as const) {
+      const res = await post(path, body);
+      expect(res.status).toBe(200);
+      expect(await res.json()).toMatchObject({ data: { ok: false, reason: "invalid-request" } });
+    }
+    const long = await app.request(`/auth/oauth/request?${"a".repeat(8_193)}`);
+    expect(await long.json()).toMatchObject({ data: { ok: false, reason: "invalid-request" } });
+    expect(asked).toBe(0);
+  });
+
+  it("shows a device code, takes a no without the approver, and a yes with it", async () => {
+    const subjects: string[] = [];
+    const { oauth, app, post, minted } = make(() => {
+      subjects.push("user-9");
+      return "user-9";
+    });
+    const startDevice = async () => {
+      const started = await oauth.deviceAuthorization({ client_id: "acme-cli" }, null);
+      return started.body as { device_code: string; user_code: string };
+    };
+
+    const denied = await startDevice();
+    const view = await app.request(`/auth/oauth/device?code=${denied.user_code}`);
+    expect(await view.json()).toMatchObject({
+      data: { ok: true, clientName: "Acme CLI", userCode: denied.user_code },
+    });
+    expect(
+      await (await post("/device", { code: denied.user_code, decision: "deny" })).json(),
+    ).toEqual({
+      data: { ok: true },
+    });
+    expect(subjects).toEqual([]);
+
+    const approved = await startDevice();
+    expect(
+      await (await post("/device", { code: approved.user_code, decision: "approve" })).json(),
+    ).toEqual({
+      data: { ok: true },
+    });
+    const poll = await oauth.token(
+      {
+        grant_type: "urn:ietf:params:oauth:grant-type:device_code",
+        device_code: approved.device_code,
+        client_id: "acme-cli",
+      },
+      null,
+    );
+    expect(poll.status).toBe(200);
+    expect(subjects).toEqual(["user-9"]);
+    expect(minted.map((m) => m.subject)).toEqual(["user-9"]);
+
+    const unknown = await app.request("/auth/oauth/device?code=BBBB-BBBB");
+    expect(await unknown.json()).toMatchObject({ data: { ok: false, reason: "unknown-code" } });
   });
 });
 

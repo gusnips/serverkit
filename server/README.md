@@ -1442,7 +1442,14 @@ container, a chat. The script prints a link and a short code, the person approve
 and the script's next poll gets the key.
 
 ```ts
-import { createOAuth, oauthRoutes } from "@gusnips/server/oauth";
+import { deriveOAuthSigningKey, fetchClientDocument } from "@gusnips/server/node";
+import {
+  createOAuth,
+  isOAuthPath,
+  oauthChallenge,
+  oauthConsoleRoutes,
+  oauthRoutes,
+} from "@gusnips/server/oauth";
 import { createPgOAuthStore } from "@gusnips/server/pg";
 
 const oauth = createOAuth({
@@ -1450,8 +1457,9 @@ const oauth = createOAuth({
   resource: "https://api.example.com/mcp",
   authorizePage: "https://example.com/oauth/authorize",
   devicePage: "https://example.com/device",
-  secret: env.OAUTH_SECRET, // 32 random bytes or more, and never changed
+  secret: deriveOAuthSigningKey(env.SERVICE_SECRET), // from a secret you already keep
   store: createPgOAuthStore(pool, { table: "app.oauth_grants" }),
+  fetchClientDocument, // no private address, no redirect
   deviceClients: { "acme-cli": "Acme CLI" },
   mintKey: async ({ subject, keyName }) => {
     if (!(await mayHaveKey(subject))) return { refused: "Only admins can connect apps." };
@@ -1459,38 +1467,66 @@ const oauth = createOAuth({
   },
 });
 
-// A 401 from your door now says where to sign in.
-const errorResponse = createErrorResponse({ internal, validation, challenge: oauth.challenge });
-app.use("/oauth/*", rateLimit({ store, limit: 30, windowMs: 60_000, ... }));
-app.route("/", oauthRoutes(oauth)); // before your own CORS, which would answer its preflights
+// A 401 from your door now says where to sign in. It needs only the door's URL.
+const errorResponse = createErrorResponse({
+  internal,
+  validation,
+  challenge: oauthChallenge("https://api.example.com/mcp"),
+});
+// Its routes answer any origin themselves, so your own CORS steps aside for them.
+app.use("*", (c, next) => (isOAuthPath(c.req.path) ? next() : firstPartyCors(c, next)));
+app.route("/", oauthRoutes<AppEnv>(oauth, { deviceKey: addressOf, refuse: tooManyRequests }));
+// Your two pages call these, behind your own session.
+app.route("/auth/oauth", oauthConsoleRoutes<AppEnv>(oauth, { approver }));
 ```
 
-`oauth.challenge` is
+`oauthChallenge` gives the same value as `oauth.challenge`:
 `Bearer resource_metadata="https://api.example.com/.well-known/oauth-protected-resource/mcp"`.
-A client that meets your door without a token reads it and starts the sign-in.
+A client that meets your door without a token reads it and starts the sign-in. `oauthRoutes`
+caps its bodies at 64 KiB and lets one caller (`deviceKey`, an address your server checked) start
+10 device sign-ins a minute, refused with your own 429.
 
-Your web app draws two pages, behind its own sign-in, and reaches `oauth` through two routes of
-your API:
+`deriveOAuthSigningKey` is HMAC-SHA256 of your secret with the fixed label `oauth:v1`, so every
+instance signs the same way and no new variable is needed. A client id is a signature, so changing
+that secret unregisters every connected app (their keys keep working). It needs Node, as does
+`fetchClientDocument`; in a Worker, pass a random `secret` and leave the default fetch.
+
+Your web app draws two pages, behind its own sign-in, and `oauthConsoleRoutes` is what they call.
+`approver(c, choice)` runs before every yes, never before a no: return who said yes (it reaches
+`mintKey` as `subject`), and throw your own error when they may not have another key, so the
+refusal shows on your page and not inside the client. `choice` is whatever your page sent with the
+yes, such as a workspace. It came from the browser, so check it.
+
+```ts
+const approver = async (c: Context<AppEnv>) => {
+  const user = c.get("user");
+  await keys.assertRoomForOne(user.id); // your 4xx when every key the plan allows is in use
+  return user.id;
+};
+```
 
 - **The consent page** (`authorizePage`). The client sends the person there with its request in
-  the query string. `describe(query)` says what to show: the app's name, where the code goes, and
-  the name the key gets. `approve(query, userId)` returns `redirectTo`, where the browser goes
-  next. "Cancel" goes to `cancelUrl`. Check that the person may make a key before you call
-  `approve`, so a refusal shows on your page and not inside the client.
-- **The device page** (`devicePage`). The link the script prints carries the code. Show the code
-  from `describeDevice(code)`, the app's name, and this: go on only if you started this sign-in
-  yourself, just now, and the code matches the one on your screen. Nothing on the server can tell
-  a link the person started from one somebody else started and sent them (RFC 8628 §5.4), so
-  that sentence is the guard. Then `decideDevice(code, { subject: userId })`, or
-  `decideDevice(code, "deny")`.
+  the query string. `GET /request?<that query, as it came>` says what to show: the app's name,
+  where the code goes, and the name the key gets. `POST /approve` with `{ query, choice? }`
+  returns `redirectTo`, where the browser goes next. "Cancel" goes to `cancelUrl`.
+- **The device page** (`devicePage`). The link the script prints carries the code.
+  `GET /device?code=WDJB-MJHT` returns the code and the app's name. Show them, and this: go on
+  only if you started this sign-in yourself, just now, and the code matches the one on your
+  screen. Nothing on the server can tell a link the person started from one somebody else started
+  and sent them (RFC 8628 §5.4), so that sentence is the guard. Then `POST /device` with
+  `{ code, decision: "approve" | "deny", choice? }`.
+
+`@gusnips/react/oauth`'s `useConsentRequest` and `useDeviceApproval` make exactly these calls
+through your API client.
 
 Serve both pages with `frame-ancestors 'none'`, so another site can't frame them and steal the
-click. Read the session on those two routes from a header, as an API does, not from a cookie,
-or protect them against cross-site requests.
+click. Read the session on those routes from a header, as an API does, not from a cookie, or
+protect them against cross-site requests.
 
-Both return `{ ok: false, reason, message }` instead of throwing. `reason` is one of
-`unknown-client`, `redirect-mismatch`, `invalid-request`, `wrong-resource` and `unknown-code`;
-word your own page for it, and never redirect on a refusal.
+Each route answers `{ data }`. A refusal is `{ data: { ok: false, reason, message } }`, not an
+error: `reason` is one of `unknown-client`, `redirect-mismatch`, `invalid-request` (also a body
+your own page would never send), `wrong-resource` and `unknown-code`. Word your own page for it,
+and never redirect on a refusal. What `approver` throws goes through your `onError`.
 
 The grants live in one table:
 
@@ -1517,7 +1553,10 @@ CREATE INDEX oauth_grants_expires_at_idx ON app.oauth_grants (expires_at);
 
 - **Only hashes are stored.** A code and a device code are SHA-256 in `hash`, and nothing in the
   table signs anyone in. Run `oauth.prune()` once a night: it deletes grants that expired more
-  than a day ago.
+  than a day ago. A worker without `oauth` calls the store's `prune(before)` with the same day.
+- **Copy the table into a numbered migration, then check it.** In the test that applies your
+  migrations, `expect(await checkOAuthTable(pool, { table: "app.oauth_grants" })).toEqual([])`
+  from `/pg` names any column that drifted from what the store reads and writes.
 - **A client id comes three ways.** An https URL is a client metadata document: fetched, checked
   and cached for five minutes, which the MCP spec asks for. It is fetched only by `describe` and
   `approve`, behind your sign-in, and never by the public routes, so nobody can make your server
@@ -1537,16 +1576,10 @@ CREATE INDEX oauth_grants_expires_at_idx ON app.oauth_grants (expires_at);
   sign-in, because a desktop app listens on whichever port is free (RFC 8252 §7.3).
 - **No expiry and no refresh token.** The key lasts until someone revokes it, like one pasted by
   hand.
-- **On a server, fetch metadata documents with `fetchPublic`.** The default checks the URL's
-  shape and follows no redirect, which is all a Worker can do. `fetchPublic` from `/node` also
-  refuses a name that resolves to a private address:
-
-  ```ts
-  fetchClientDocument: async (url) => {
-    const got = await fetchPublic(url, { maxRedirects: 0, signal: AbortSignal.timeout(5_000) });
-    return got.ok ? got.response : null;
-  },
-  ```
+- **On a server, pass `fetchClientDocument` from `/node`.** The default checks the URL's shape
+  and follows no redirect, which is all a Worker can do. The `/node` one is built on
+  `fetchPublic`, so it also refuses a name that resolves to a private address, and gives up after
+  five seconds.
 
 The client id format matches the first backend that shipped this, byte for byte. claude.ai and
 ChatGPT keep a client id forever, so a new format would disconnect every app already connected.

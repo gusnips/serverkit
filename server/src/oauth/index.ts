@@ -6,7 +6,7 @@
  * the only ones there are.
  *
  * - **Discovery.** The protected-resource document (RFC 9728) and the authorization-server
- *   document (RFC 8414). Your door's 401 names the first one: pass `challenge` to
+ *   document (RFC 8414). Your door's 401 names the first one: pass `oauthChallenge(resource)` to
  *   `createErrorResponse`.
  * - **Three kinds of client id.** An https URL is a Client ID Metadata Document: fetched, checked
  *   and cached, which the MCP spec asks for and ChatGPT tries first. Anything else is a dynamic
@@ -21,8 +21,9 @@
  *   started from one somebody else started and sent them, so the device page must say to go on
  *   only if they started this sign-in themselves, just now (RFC 8628 §5.4).
  *
- * Your consent and device pages sit behind your own session and call `describe` and `approve`,
- * `describeDevice` and `decideDevice`. Everything public is `oauthRoutes`.
+ * Your consent and device pages sit behind your own session and reach `describe`, `approve`,
+ * `describeDevice` and `decideDevice` through `oauthConsoleRoutes`. Everything public is
+ * `oauthRoutes`.
  *
  * The envelope is the format the first backend to ship this signed its clients with, kept byte
  * for byte: claude.ai and ChatGPT store a client id forever, so a new format would disconnect
@@ -57,6 +58,9 @@ const CLIENT_DOCUMENT_TIMEOUT_MS = 5_000;
  */
 const USER_CODE_ALPHABET = "BCDFGHJKLMNPQRSTVWXZ";
 const USER_CODE_LENGTH = 8;
+
+/** RFC 9728's well-known path. The door's own path follows it in the document's address. */
+const PROTECTED_RESOURCE_PATH = "/.well-known/oauth-protected-resource";
 
 const CLIENT_PURPOSE = "oauth-client";
 const SECRET_PURPOSE = "oauth-client-secret";
@@ -258,7 +262,6 @@ export function createOAuth(options: OAuthOptions) {
   const now = options.now ?? (() => new Date());
   const fetchClientDocument = options.fetchClientDocument ?? defaultFetchClientDocument;
   const resourcePath = new URL(resource).pathname.replace(/\/+$/, "");
-  const metadataUrl = `${issuer}/.well-known/oauth-protected-resource${resourcePath}`;
   const documents = new Map<string, { client: OAuthClient; until: number }>();
   const deviceClients = options.deviceClients ?? {};
   const isDeviceClient = (clientId: string) => Object.hasOwn(deviceClients, clientId);
@@ -464,9 +467,9 @@ export function createOAuth(options: OAuthOptions) {
 
   return {
     /** For `createErrorResponse`'s `challenge`: a 401 that tells a client where to sign in. */
-    challenge: `Bearer resource_metadata="${metadataUrl}"`,
+    challenge: oauthChallenge(resource),
     /** Where `oauthRoutes` serves the protected-resource document, besides the bare path. */
-    metadataPath: `/.well-known/oauth-protected-resource${resourcePath}`,
+    metadataPath: `${PROTECTED_RESOURCE_PATH}${resourcePath}`,
 
     /** RFC 9728. */
     protectedResourceMetadata(): Record<string, unknown> {
@@ -786,6 +789,17 @@ function sameRedirect(registered: string, requested: string): boolean {
   return a.toString() === b.toString();
 }
 
+/**
+ * The `WWW-Authenticate` value for your door's 401, from the door's URL alone, so the error
+ * response can be built before `createOAuth` is. It equals `createOAuth(...).challenge`.
+ *
+ *     createErrorResponse({ ..., challenge: oauthChallenge("https://api.example.com/mcp") });
+ */
+export function oauthChallenge(resource: string): string {
+  const url = new URL(resource);
+  return `Bearer resource_metadata="${url.origin}${PROTECTED_RESOURCE_PATH}${url.pathname.replace(/\/+$/, "")}"`;
+}
+
 /** The S256 challenge a verifier must match. */
 export async function challengeOf(verifier: string): Promise<string> {
   return base64UrlOf(
@@ -868,4 +882,5 @@ function isStringList(value: unknown): value is string[] {
   return Array.isArray(value) && value.every((item) => typeof item === "string");
 }
 
-export { oauthRoutes } from "./routes.ts";
+export { isOAuthPath, oauthConsoleRoutes, oauthRoutes } from "./routes.ts";
+export type { OAuthConsoleOptions, OAuthRoutesOptions } from "./routes.ts";
