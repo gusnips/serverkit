@@ -461,6 +461,32 @@ app.route(
   refusal carries it too.
 - One method and path twice in the list throws.
 
+### Inside an Express app
+
+An Express backend serves the same Hono app, `restRoutes` and `mcpRoutes` included, through
+`fromHono`:
+
+```bash
+bun add hono @hono/node-server
+```
+
+```ts
+import { fromHono } from "@gusnips/server/express";
+
+app.use(["/v1", "/mcp"], fromHono(api)); // api: your Hono app, routes under /v1 and /mcp
+app.use(express.json()); // after it, never before
+```
+
+- **Mount it before any body parser.** After `express.json()` the body is already read, so a POST
+  would reach your API as `{}`. `fromHono` refuses such a request and passes an error to your
+  error middleware that says to move it, so the wrong order fails on the first request.
+- **Your Hono routes keep their full paths.** Express cuts the mount path off the URL, and
+  `fromHono` puts it back, so `/v1/things` is `/v1/things` on both sides.
+- Express middleware mounted before it, such as `helmet()` or `cors()`, still runs.
+- In a Hono route, `c.env.incoming` is the Node request, so the caller's address is
+  `c.env.incoming.socket.remoteAddress`. Type the app `new Hono<{ Bindings: HttpBindings }>()`,
+  with `HttpBindings` from `@hono/node-server`.
+
 ## Supabase Auth
 
 If your API verifies a Supabase token, it makes one decision every client depends on: did auth
