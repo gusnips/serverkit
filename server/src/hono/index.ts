@@ -26,6 +26,8 @@ export type { ClientIpOptions, ClientIpVariables } from "./client-ip.ts";
 export { rateLimit } from "./rate-limit.ts";
 export type { RateLimitOptions } from "./rate-limit.ts";
 export { requestLogger } from "./request-logger.ts";
+export { restRoutes } from "./rest-routes.ts";
+export type { RestAnswer, RestRequest, RestRoute, RestRoutesOptions } from "./rest-routes.ts";
 export type { RequestLoggerOptions, RequestVariables } from "./request-logger.ts";
 export { apiSecureHeaders, corsAllowList } from "./headers.ts";
 export type { CorsAllowListOptions } from "./headers.ts";

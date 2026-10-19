@@ -65,7 +65,7 @@ serverkit/
 │       ├── errors.ts     ← AppError and createAppError(): your code→status map is the contract
 │       ├── responses.ts  ← the envelope both ways: ok/created/paginated, and createErrorResponse
 │       ├── logger/       ← createLogger() and the serializer that decides what a log line keeps
-│       ├── hono/         ← the edge: errorBoundary, guards, headers, CORS and the four adapters
+│       ├── hono/         ← the edge: errorBoundary, guards, headers, CORS, the four adapters and restRoutes
 │       ├── supabase/     ← isAuthOutage(): did auth say no, or fail to answer?
 │       ├── pg/           ← createPgPool() with a bounded wait; createIdempotency(); the OAuth store
 │       ├── redis/        ← createRedis(), the bounded probes, and the rate-limit window store
@@ -237,7 +237,7 @@ both Bun 1.3.8 and Node 22. It is the driver's, not the runner's, and `describeT
 brackets is still right for the guard. Someone on IPv6 loopback writes `localhost` or passes the
 host outside the URL.
 
-### …and thirty for `@gusnips/server`
+### …and thirty-one for `@gusnips/server`
 
 21. **A success builder returns an ANSWER, not a body — so on Hono, import the adapters.** `ok`,
     `created`, `paginated` and `noContent` in `responses.ts` answer `{ status, body }`, because the
@@ -1018,6 +1018,28 @@ Unhandled error event:", ...)` and returns — it never emits, so Node's throw i
     snapshot before the other's insert. Nobody has measured it either way. It comes here only
     with a test that races two creates on a real Postgres.
 
+51. **An operation's REST route reads its input one way, refuses a body it cannot read, and
+    validates nothing.** Three backends mounted their operation lists with a loop of their own,
+    and each knew something the others did not. Two read the query with `c.req.query()`, which
+    keeps the first of a repeated name; the third kept every value, because its filters take
+    several. Two read a body that failed to parse as `{}` so the schema would answer, which would
+    run a write whose fields all have defaults on a body nobody could read; the third refused it,
+    and refused a string, an array or `null` the same way. One read a DELETE's input from its body
+    and two from the query. `buildOpenApi` already documents the query, so the route follows the
+    reference: a second rule would let the route and its docs disagree. The path's slots arrive
+    apart from the input, because one backend keeps them apart and two merge them with the path
+    winning, and that merge is one line in `run`.
+
+    **Validation is the product's, because the order is.** One backend checks the owner, the
+    grant, the workspace's state and its policy before it parses, and before it looks up a stored
+    answer, so a caller who may not call learns nothing about the schema and is never handed a
+    replay. A transport that parsed first would undo that, so `run` gets the input as it was read.
+    `before` runs ahead of the body limit for the reason invariant 41 gives. A header set inside
+    `run` survives a refusal, because `errorHandler` answers through `c.json` on the same context:
+    one backend shows what a refused call cost that way, and a test pins it. A 204 drops `data`,
+    because one operation can hand its MCP tool a result while its REST answer has no body. Ten
+    planted defects, each caught by a named test, with a green control.
+
 ### …and four for `@gusnips/sdkgen`
 
 Five backends each wrote an SDK generator, 426 to 616 lines each and 2,517 in all. What they share
@@ -1025,7 +1047,7 @@ is the reader, the schema writer and the writer, and those came across with ever
 merged. The method loop and the transport under it came second: the loop was the same in all five
 once the product's choices (doc text, a spec field, hand-written members) became options.
 
-51. **A schema the writer does not understand throws. It never becomes `unknown`.** A wrong
+52. **A schema the writer does not understand throws. It never becomes `unknown`.** A wrong
     `unknown` in a published SDK compiles for everyone who installs it and tells none of them. The
     writer returns `unknown` only where the schema itself allows any value (`{}`, `true`, the
     values of a bare `object`), and refuses `allOf`, `$ref` and anything else it would have to guess at. The
@@ -1033,7 +1055,7 @@ once the product's choices (doc text, a spec field, hand-written members) became
     a boolean schema and a tuple in one. `typeNames` reads names inside a generic, where one copy
     split on `|` and missed `JobDto` in `V1ListPage<JobDto>[]`.
 
-52. **The reader keeps every line where it was.** It blanks comments and strings to read the
+53. **The reader keeps every line where it was.** It blanks comments and strings to read the
     structure, then copies the ORIGINAL lines, so the two texts must match line for line. All five
     copies broke that, in four ways, and none had a test for any of them:
     - an escape inside a string dropped its escaped character, or blanked it to a space, so a
@@ -1069,7 +1091,7 @@ once the product's choices (doc text, a spec field, hand-written members) became
     than an adapter, because `liftContract` returns one string, so a caller cannot tell afterwards
     which declarations were roots.
 
-53. **The output goes through the repo's own prettier before it is compared.** The generated files
+54. **The output goes through the repo's own prettier before it is compared.** The generated files
     are checked in, so the generator's `--check` and `prettier --check` must never disagree about
     one file. A file that cannot be read for a reason other than not existing throws rather than
     reading as stale, because "stale" would send someone to regenerate over a permission error.
@@ -1083,7 +1105,7 @@ once the product's choices (doc text, a spec field, hand-written members) became
     it. None of its operations needed it, so its output did not change, and the day one does, its
     generator now stops and names the type instead of publishing `unknown`.
 
-54. **The transport asks the retry rule about the answer, and a write is repeatable only with a key
+55. **The transport asks the retry rule about the answer, and a write is repeatable only with a key
     the server reads.** Of the five SDKs, three decided from their own error class's `retryAfter`,
     a number or nothing, so a server's explicit `details.retryAfterSecs: null` never reached the
     decision; two read the body's wait before the `Retry-After` header and read the header only as
