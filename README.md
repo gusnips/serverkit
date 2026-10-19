@@ -1,5 +1,9 @@
 # serverkit
 
+**This repo moved to [gusnips/kit](https://github.com/gusnips/kit), with its full history.** It is archived, so it is read-only. Open issues and pull requests on gusnips/kit.
+
+The npm names did not change: `@gusnips/migrate`, `@gusnips/server` and `@gusnips/sdkgen` publish from kit now, starting with `@gusnips/server` 0.14.1.
+
 Packages for the server side of a Bun or Node app on Postgres.
 
 ```bash
