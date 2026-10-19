@@ -51,7 +51,8 @@ import {
 } from "./hono/index.ts";
 import type { RequestVariables } from "./hono/index.ts";
 import { mcpRoutes, registerOperation, type ToolOperation } from "./mcp/index.ts";
-import { createOAuth, type OAuthStore } from "./oauth/index.ts";
+import { createOAuth } from "./oauth/index.ts";
+import { createMemoryOAuthStore } from "./oauth/testing.ts";
 import { buildOpenApi, createOpenApiResponder, type OpenApiOperation } from "./openapi/index.ts";
 import { isAuthOutage } from "./supabase/index.ts";
 import { createPgPool, pingPool } from "./pg/index.ts";
@@ -583,8 +584,7 @@ describe("README — signing an agent in", () => {
       authorizePage: "https://example.com/oauth/authorize",
       devicePage: "https://example.com/device",
       secret: "x".repeat(32),
-      // Never reached: the challenge is computed from the options alone.
-      store: {} as OAuthStore,
+      store: createMemoryOAuthStore(),
       mintKey: async () => "key_1",
     });
     expect(oauth.challenge).toBe(

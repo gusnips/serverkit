@@ -994,15 +994,20 @@ Unhandled error event:", ...)` and returns — it never emits, so Node's throw i
     CLI and send a stranger the link. The guard is the page saying to go on only if you started
     the sign-in yourself (RFC 8628 §5.4), and the README says so.
     The setup three adopters then copied by hand lives here too (2026-10-19). The signing key is
-    HMAC-SHA256 of a secret the server already keeps, under the fixed label `oauth:v1`
-    (`deriveOAuthSigningKey`); a test pins one derived key, because every client id already
-    connected was signed under it. The console routes ask the product's `approver` before every
+    HMAC-SHA256 of a secret the server already keeps, under the label `oauth:v1` unless the
+    adopter already signed under another (`deriveOAuthSigningKey`); tests pin a derived key for
+    each, because every client id already connected was signed under it. An adopter that derived
+    its key another way (HKDF) keeps its own line, since a new key disconnects every app. The root
+    is refused under 32 characters or in a placeholder's shape, the same rule as `validateEnv`.
+    The console routes ask the product's `approver` before every
     yes and never before a no, and answer a body the page would never send as an
     `invalid-request` refusal, never a redirect. `oauthRoutes` counts device starts per caller on
     the POST alone, so a preflight never spends one, and caps its bodies at 64 KiB in OAuth's
     shape. `checkOAuthTable` measures a product's migration against what the store writes. Planted
     changes (a new label, the approver on a no, no device limit, a prefix match without its slash,
-    the null check off) each failed one test.
+    the null check off) each failed one test. `createMemoryOAuthStore` in `/oauth/testing` is the
+    kit suite's own fake, run through the same flows as Postgres, so adopters stop writing one
+    each; it is a subpath of its own so nobody serves with it.
 
 50. **An API key keeps the bytes its donors minted, and its shape is checked with the literal
     prefix.** Nine backends mint API keys. Five mint the same one on `node:crypto`, with only the

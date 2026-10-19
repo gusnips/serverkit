@@ -2,21 +2,37 @@ import { createHmac } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import { deriveOAuthSigningKey, fetchClientDocument } from "./oauth.ts";
 
-const SHARED = "a-shared-server-secret-of-forty-bytes-x";
+const ROOT = "a-shared-server-secret-of-forty-bytes-x";
 
 describe("deriveOAuthSigningKey", () => {
-  it("is the key every adopter derived by hand, byte for byte", () => {
-    expect(deriveOAuthSigningKey(SHARED)).toBe(
-      createHmac("sha256", SHARED).update("oauth:v1").digest("base64url"),
+  it("is the key adopters derived by hand, byte for byte", () => {
+    expect(deriveOAuthSigningKey(ROOT)).toBe(
+      createHmac("sha256", ROOT).update("oauth:v1").digest("base64url"),
     );
-    // Pinned, so a changed label fails here before it disconnects anybody's apps.
-    expect(deriveOAuthSigningKey(SHARED)).toBe("ho2wTSibPWIkyIJ7x9ahXb43hUFNmmLbspEB8YKnF0I");
+    // Pinned, so a changed default or algorithm fails here before it disconnects anybody's apps.
+    expect(deriveOAuthSigningKey(ROOT)).toBe("ho2wTSibPWIkyIJ7x9ahXb43hUFNmmLbspEB8YKnF0I");
   });
 
-  it("refuses a secret too short to derive from", () => {
+  it("signs under the label an adopter already used", () => {
+    expect(deriveOAuthSigningKey(ROOT, "app:oauth:v1")).toBe(
+      createHmac("sha256", ROOT).update("app:oauth:v1").digest("base64url"),
+    );
+    expect(deriveOAuthSigningKey(ROOT, "app:oauth:v1")).toBe(
+      "va_4We6dE9_qlD_SX5wgkqymrMCB8coRpujdu4PMSmQ",
+    );
+    expect(() => deriveOAuthSigningKey(ROOT, "")).toThrow(TypeError);
+  });
+
+  it("refuses a secret anyone could guess", () => {
     expect(() => deriveOAuthSigningKey("")).toThrow(TypeError);
-    expect(() => deriveOAuthSigningKey("x".repeat(31))).toThrow(TypeError);
-    expect(deriveOAuthSigningKey("x".repeat(32))).toHaveLength(43);
+    expect(() => deriveOAuthSigningKey("x".repeat(31))).toThrow(/31 characters/);
+    expect(() => deriveOAuthSigningKey("dev-egress-secret-change-me-0123456789")).toThrow(
+      /placeholder/,
+    );
+    expect(() => deriveOAuthSigningKey("<generate: openssl rand -base64 32>")).toThrow(
+      /placeholder/,
+    );
+    expect(deriveOAuthSigningKey("k".repeat(32))).toHaveLength(43);
   });
 });
 

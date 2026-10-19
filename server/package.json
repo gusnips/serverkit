@@ -46,6 +46,10 @@
       "types": "./dist/oauth/index.d.ts",
       "default": "./dist/oauth/index.js"
     },
+    "./oauth/testing": {
+      "types": "./dist/oauth/testing.d.ts",
+      "default": "./dist/oauth/testing.js"
+    },
     "./mail": {
       "types": "./dist/node/mail/index.d.ts",
       "default": "./dist/node/mail/index.js"

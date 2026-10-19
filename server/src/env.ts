@@ -64,6 +64,11 @@ const PLACEHOLDERS = [
   /(?:^|[-_,.])x{3,}$/, // sk-proj-xxx, aact_prod_xxxx
 ];
 
+/** Whether a secret is shaped like an `.env.example` placeholder. */
+export function isPlaceholder(value: string): boolean {
+  return PLACEHOLDERS.some((shape) => shape.test(value));
+}
+
 /** Thrown by `validateEnv`. The message lists every problem, and `problems` holds each one. */
 export class EnvError extends Error {
   readonly problems: readonly string[];
@@ -118,7 +123,7 @@ export function envProblems<Source extends object>(
   for (const [key, fewest] of Object.entries(spec.secrets ?? {})) {
     const value = textOf(key);
     if (value === "") continue;
-    if (PLACEHOLDERS.some((shape) => shape.test(value)))
+    if (isPlaceholder(value))
       problems.push(
         `${key} looks like a placeholder from .env.example. Put the real secret there.`,
       );

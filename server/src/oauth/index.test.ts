@@ -5,6 +5,7 @@ import { Pool } from "pg";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { hasPostgres, startPostgres } from "../__tests__/postgres-server.ts";
 import { checkOAuthTable, createPgOAuthStore } from "../pg/oauth-store.ts";
+import { createMemoryOAuthStore } from "./testing.ts";
 import {
   challengeOf,
   createOAuth,
@@ -31,64 +32,6 @@ const CALLBACK = "https://agent.example/callback";
 // RFC 7636 appendix B.
 const VERIFIER = "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk";
 const CHALLENGE = "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM";
-
-/** The store contract, kept in a `Map`. Fine here: a test is one process. */
-function memoryStore(): OAuthStore {
-  const rows: OAuthGrant[] = [];
-  const pending = (userCodeHash: string, now: Date) =>
-    // The newest first, as the Postgres store orders by `created_at`.
-    [...rows]
-      .reverse()
-      .find(
-        (row) =>
-          row.userCodeHash === userCodeHash &&
-          row.kind === "device" &&
-          row.status === "pending" &&
-          row.expiresAt > now,
-      );
-  return {
-    async insert(grant) {
-      rows.push({ ...grant });
-    },
-    async spendCode(hash, now) {
-      const row = rows.find((r) => r.hash === hash);
-      if (!row || row.kind !== "code" || row.status !== "approved" || row.expiresAt <= now)
-        return null;
-      row.status = "used";
-      return { ...row };
-    },
-    async findDevice(userCodeHash, now) {
-      const row = pending(userCodeHash, now);
-      return row ? { ...row } : null;
-    },
-    async decideDevice(userCodeHash, decision, now) {
-      const row = pending(userCodeHash, now);
-      if (!row) return false;
-      row.status = decision.status;
-      if (decision.status === "approved") {
-        row.subject = decision.subject;
-        row.keyName = decision.keyName;
-      }
-      return true;
-    },
-    async pollDevice(hash, clientId, now) {
-      const row = rows.find(
-        (r) => r.hash === hash && r.kind === "device" && r.clientId === clientId,
-      );
-      if (!row) return null;
-      const before = { ...row };
-      row.polledAt = now;
-      if (row.status === "approved") row.status = "used";
-      return before;
-    },
-    async prune(before) {
-      const kept = rows.filter((row) => row.expiresAt >= before);
-      const dropped = rows.length - kept.length;
-      rows.splice(0, rows.length, ...kept);
-      return dropped;
-    },
-  };
-}
 
 function authorizeQuery(clientId: string, overrides: Record<string, string> = {}) {
   return new URLSearchParams({
@@ -661,7 +604,7 @@ function flows(name: string, setup: () => Promise<{ store: () => OAuthStore }>) 
   });
 }
 
-flows("createOAuth with a memory store", async () => ({ store: memoryStore }));
+flows("createOAuth with a memory store", async () => ({ store: createMemoryOAuthStore }));
 
 describe.skipIf(!hasPostgres)("createPgOAuthStore", () => {
   let server: Awaited<ReturnType<typeof startPostgres>>;
@@ -754,7 +697,7 @@ describe("oauthRoutes", () => {
     authorizePage: "https://example.com/oauth/authorize",
     devicePage: "https://example.com/device",
     secret: SECRET,
-    store: memoryStore(),
+    store: createMemoryOAuthStore(),
     deviceClients: { "acme-cli": "Acme CLI" },
     documentation: "https://example.com/docs",
     mintKey: async () => "ak_1",
@@ -876,7 +819,7 @@ describe("oauthRoutes' own limits", () => {
       authorizePage: "https://example.com/oauth/authorize",
       devicePage: "https://example.com/device",
       secret: SECRET,
-      store: memoryStore(),
+      store: createMemoryOAuthStore(),
       deviceClients: { "acme-cli": "Acme CLI" },
       mintKey: async () => "ak_1",
     });
@@ -950,7 +893,7 @@ describe("oauthConsoleRoutes", () => {
       authorizePage: "https://example.com/oauth/authorize",
       devicePage: "https://example.com/device",
       secret: SECRET,
-      store: memoryStore(),
+      store: createMemoryOAuthStore(),
       deviceClients: { "acme-cli": "Acme CLI" },
       mintKey: async (grant) => {
         minted.push({ subject: grant.subject, keyName: grant.keyName });

@@ -1486,22 +1486,34 @@ A client that meets your door without a token reads it and starts the sign-in. `
 caps its bodies at 64 KiB and lets one caller (`deviceKey`, an address your server checked) start
 10 device sign-ins a minute, refused with your own 429.
 
-`deriveOAuthSigningKey` is HMAC-SHA256 of your secret with the fixed label `oauth:v1`, so every
-instance signs the same way and no new variable is needed. A client id is a signature, so changing
-that secret unregisters every connected app (their keys keep working). It needs Node, as does
-`fetchClientDocument`; in a Worker, pass a random `secret` and leave the default fetch.
+`deriveOAuthSigningKey(root, label = "oauth:v1")` is the HMAC-SHA256 of `label`, keyed with
+`root`, so every instance signs the same way and no new variable is needed. It throws when `root`
+is under 32 characters or looks like an `.env.example` placeholder. A client id is a signature,
+and a client keeps it forever, so changing `root` unregisters every connected app (their keys keep
+working). Already deriving a key by hand? Pass the label you used and pin a key your old code
+made in a test. Derived another way, such as HKDF? Keep your own line: a new key disconnects every
+app. It needs Node, as does `fetchClientDocument`; in a Worker, pass a random `secret` and leave
+the default fetch.
 
 Your web app draws two pages, behind its own sign-in, and `oauthConsoleRoutes` is what they call.
 `approver(c, choice)` runs before every yes, never before a no: return who said yes (it reaches
 `mintKey` as `subject`), and throw your own error when they may not have another key, so the
 refusal shows on your page and not inside the client. `choice` is whatever your page sent with the
-yes, such as a workspace. It came from the browser, so check it.
+yes, such as a workspace, or `undefined`. It came from the browser, so parse it with your schema.
 
 ```ts
 const approver = async (c: Context<AppEnv>) => {
   const user = c.get("user");
   await keys.assertRoomForOne(user.id); // your 4xx when every key the plan allows is in use
   return user.id;
+};
+
+// With a workspace picker. What `parse` throws goes through your onError as a 400.
+const Choice = z.object({ workspaceId: z.string().uuid() });
+const approveInWorkspace = async (c: Context<AppEnv>, choice: unknown) => {
+  const { workspaceId } = Choice.parse(choice);
+  await workspaces.assertMayConnect(c.get("user").id, workspaceId);
+  return JSON.stringify({ user: c.get("user").id, workspaceId }); // your own subject encoding
 };
 ```
 
@@ -1584,6 +1596,10 @@ CREATE INDEX oauth_grants_expires_at_idx ON app.oauth_grants (expires_at);
 The client id format matches the first backend that shipped this, byte for byte. claude.ai and
 ChatGPT keep a client id forever, so a new format would disconnect every app already connected.
 `/oauth` imports nothing from Node and runs in a Worker; pass your own store there.
+
+Your tests need no database: `createMemoryOAuthStore()` from `@gusnips/server/oauth/testing` keeps
+the same contract in memory, and the kit runs its own flows against it and Postgres alike. Never
+serve with it: a restart loses every sign-in in progress, and two instances don't share codes.
 
 ## A reference for your API
 
