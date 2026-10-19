@@ -85,7 +85,7 @@ serverkit/
 │       ├── unsubscribe.ts← listUnsubscribeHeaders(): both one-click headers, for any sender
 │       ├── text-from-html.ts ← textFromHtml(): a mail's text part from its HTML, addresses kept
 │       ├── env.ts        ← validateEnv(): every problem with the environment, in one error
-│       ├── node/         ← the one directory allowed Node: fetchPublic(), scryptSealKey() and the drain
+│       ├── node/         ← the one directory allowed Node: fetchPublic(), scryptSealKey(), the API key codec and the drain
 │       │   └── mail/     ← createMailer(), the /mail subpath: SMTP needs a socket a Worker lacks
 │       └── __tests__/    ← the throwaway redis-server the Redis and BullMQ suites share
 ├── scripts/
@@ -237,7 +237,7 @@ both Bun 1.3.8 and Node 22. It is the driver's, not the runner's, and `describeT
 brackets is still right for the guard. Someone on IPv6 loopback writes `localhost` or passes the
 host outside the URL.
 
-### …and twenty-nine for `@gusnips/server`
+### …and thirty for `@gusnips/server`
 
 21. **A success builder returns an ANSWER, not a body — so on Hono, import the adapters.** `ok`,
     `created`, `paginated` and `noContent` in `responses.ts` answer `{ status, body }`, because the
@@ -993,6 +993,31 @@ Unhandled error event:", ...)` and returns — it never emits, so Node's throw i
     CLI and send a stranger the link. The guard is the page saying to go on only if you started
     the sign-in yourself (RFC 8628 §5.4), and the README says so.
 
+50. **An API key keeps the bytes its donors minted, and its shape is checked with the literal
+    prefix.** Nine backends mint API keys. Five mint the same one on `node:crypto`, with only the
+    prefix changed: 16 random bytes as 32 lowercase hex, SHA-256 of the whole key, 12 characters
+    kept for display. `createApiKeyCodec` is those five, and a test pins one key's hash and display
+    prefix as computed outside the code (`shasum`), because a change there orphans every stored
+    key. Three of the five checked the shape with `new RegExp(`^${prefix}[0-9a-f]{32}$`)`, which
+    reads the prefix as a pattern: harmless for the prefixes they use, wrong for the first one with
+    a `.` in it. The check here is the literal prefix, the exact length and lowercase hex.
+
+    **A claim made while planning this was false, and measuring it is what caught it.** The
+    research said JavaScript's `$` also matches before a final newline, so those three accepted a
+    key with `\n` after it. That is Perl's and Python's `$`. Without the `m` flag, JavaScript's
+    matches only at the end (measured on Bun 1.4.2 and Node 24.21), so the three refused it all
+    along. The test keeps the newline cases, as a pin, not as a fix.
+
+    **What did NOT come across, and why.** A sixth backend mints the same key in a Worker through
+    Web Crypto, which is async, and every Node caller hashes on the auth path synchronously. Three
+    mint 24 bytes in base64url, one of them showing 10 characters, and one mints 32 bytes with
+    8 characters shown from after the prefix: an encoding option comes when one of them adopts,
+    not before. Storage, owners, grants, caps and audit are each product's. And a create capped
+    per owner stays out: two copies say one `INSERT … SELECT count(*)` keeps concurrent creates
+    under the cap, while nothing in it serializes the owner, so two creates can each count the
+    snapshot before the other's insert. Nobody has measured it either way. It comes here only
+    with a test that races two creates on a real Postgres.
+
 ### …and four for `@gusnips/sdkgen`
 
 Five backends each wrote an SDK generator, 426 to 616 lines each and 2,517 in all. What they share
@@ -1000,7 +1025,7 @@ is the reader, the schema writer and the writer, and those came across with ever
 merged. The method loop and the transport under it came second: the loop was the same in all five
 once the product's choices (doc text, a spec field, hand-written members) became options.
 
-50. **A schema the writer does not understand throws. It never becomes `unknown`.** A wrong
+51. **A schema the writer does not understand throws. It never becomes `unknown`.** A wrong
     `unknown` in a published SDK compiles for everyone who installs it and tells none of them. The
     writer returns `unknown` only where the schema itself allows any value (`{}`, `true`, the
     values of a bare `object`), and refuses `allOf`, `$ref` and anything else it would have to guess at. The
@@ -1008,7 +1033,7 @@ once the product's choices (doc text, a spec field, hand-written members) became
     a boolean schema and a tuple in one. `typeNames` reads names inside a generic, where one copy
     split on `|` and missed `JobDto` in `V1ListPage<JobDto>[]`.
 
-51. **The reader keeps every line where it was.** It blanks comments and strings to read the
+52. **The reader keeps every line where it was.** It blanks comments and strings to read the
     structure, then copies the ORIGINAL lines, so the two texts must match line for line. All five
     copies broke that, in four ways, and none had a test for any of them:
     - an escape inside a string dropped its escaped character, or blanked it to a space, so a
@@ -1044,7 +1069,7 @@ once the product's choices (doc text, a spec field, hand-written members) became
     than an adapter, because `liftContract` returns one string, so a caller cannot tell afterwards
     which declarations were roots.
 
-52. **The output goes through the repo's own prettier before it is compared.** The generated files
+53. **The output goes through the repo's own prettier before it is compared.** The generated files
     are checked in, so the generator's `--check` and `prettier --check` must never disagree about
     one file. A file that cannot be read for a reason other than not existing throws rather than
     reading as stale, because "stale" would send someone to regenerate over a permission error.
@@ -1058,7 +1083,7 @@ once the product's choices (doc text, a spec field, hand-written members) became
     it. None of its operations needed it, so its output did not change, and the day one does, its
     generator now stops and names the type instead of publishing `unknown`.
 
-53. **The transport asks the retry rule about the answer, and a write is repeatable only with a key
+54. **The transport asks the retry rule about the answer, and a write is repeatable only with a key
     the server reads.** Of the five SDKs, three decided from their own error class's `retryAfter`,
     a number or nothing, so a server's explicit `details.retryAfterSecs: null` never reached the
     decision; two read the body's wait before the `Retry-After` header and read the header only as

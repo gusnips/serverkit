@@ -1,3 +1,5 @@
+export { createApiKeyCodec } from "./api-key.ts";
+export type { ApiKeyCodec, ApiKeyCodecOptions } from "./api-key.ts";
 export { fetchPublic, pinnedRequest, resolvePublic } from "./public-fetch.ts";
 export type {
   PinnedInit,

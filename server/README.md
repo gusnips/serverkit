@@ -1179,6 +1179,34 @@ const vault = createSealer({
 });
 ```
 
+## An API key
+
+Bind the five functions to your prefix once, and export them:
+
+```ts
+import { createApiKeyCodec } from "@gusnips/server/node";
+
+export const { generateApiKey, hashApiKey, displayPrefix, looksLikeApiKey, isWellFormedApiKey } =
+  createApiKeyCodec({ prefix: "ac_" });
+
+const key = generateApiKey(); // "ac_" + 32 lowercase hex characters. Show it once.
+await db.insert({ keyHash: hashApiKey(key), prefix: displayPrefix(key) }); // "ac_1f0c9e2b4"
+```
+
+- **Store the hash and the display prefix, never the key.** The hash is SHA-256 of the whole key,
+  64 hex characters, and a request's key is looked up by it. The display prefix is the first 12
+  characters, enough to tell keys apart in a list.
+- **Check the shape before the lookup.** `looksLikeApiKey` says the token starts with your prefix,
+  so a session token sent to the key door can be told it is at the wrong door.
+  `isWellFormedApiKey` says it is exactly what `generateApiKey` mints, so a typo costs no
+  database read.
+- **Keys you minted by hand keep working**, if they are your prefix and 16 random bytes in
+  lowercase hex, hashed with SHA-256: the same key gives the same hash.
+- The prefix is a literal: a `.` in it matches only a dot. An empty prefix throws.
+
+Where keys are stored, who owns them, what they may do and how many one account may hold stay in
+your code.
+
 ## A link that proves who it is for
 
 An unsubscribe link, an OAuth `state`, an approval link: your server writes a token, hands it to a
